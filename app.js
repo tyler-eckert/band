@@ -8,7 +8,7 @@ const SUPABASE_KEY = 'sb_publishable_GP4wq5bwrQ3M0qCTwQei4A_Lsk_zBcK';   // publ
 const CAL_FUNCTION = 'band-calendar';                                        // Edge Function name for the live calendar feed
 
 /* ============================================================ data layer */
-const TABLES = ['members','settings','payees','clients','gigs','songs','setlist_items','song_ratings','merch_items','merch_sales','expenses'];
+const TABLES = ['members','settings','payees','clients','gigs','songs','setlists','setlist_items','song_ratings','merch_items','merch_sales','expenses'];
 const PK = { song_ratings: ['song_id','member_id'], settings: ['id'] };
 
 const supa = window.__BAND_MOCK__ ? null :
@@ -127,7 +127,13 @@ const pay = g => depositIn(g) + n0(g.paid);                                  // 
 const merchOf = g => n0(g.merch) + salesFor(g.id);
 const gross = g => pay(g) + n0(g.tips) + merchOf(g);
 const balanceDue = g => g.status === 'complete' && n0(g.quote) > 0 ? Math.max(0, n0(g.quote) - pay(g)) : 0;
-const setItems = id => S.setlist_items.filter(i => i.gig_id === id).sort((a, b) => a.set_no - b.set_no || a.position - b.position);
+const itemsOf = lid => S.setlist_items.filter(i => i.setlist_id === lid).sort((a, b) => a.set_no - b.set_no || a.position - b.position);
+const listOf = gid => S.setlists.find(l => l.gig_id === gid);
+const setItems = gid => { const l = listOf(gid); return l ? itemsOf(l.id) : []; };
+const gigOf = L => L && L.gig_id ? byId('gigs', L.gig_id) : null;
+const slName = L => L.name || (gigOf(L) || {}).title || 'Untitled setlist';
+// a setlist with its gig's details filled in where the setlist leaves them blank
+const slCtx = L => { const g = gigOf(L) || {}; return { ...L, start_time: L.start_time || g.start_time || null, hours: L.hours != null ? L.hours : (g.hours ?? null), title: slName(L), gig_date: g.gig_date || null }; };
 const songsPlayed = g => { const it = setItems(g.id).filter(i => i.played); return it.length || n0(g.songs_played_legacy); };
 const upcoming = (kinds = ['gig','practice']) => S.gigs.filter(g => g.gig_date && g.gig_date >= todayIso() && kinds.includes(g.kind) && (g.kind === 'practice' || ['confirmed','quoted','inquiry'].includes(g.status))).sort((a, b) => a.gig_date.localeCompare(b.gig_date));
 const statusPill = g => g.kind === 'practice' ? '<span class="pill st-practice">Practice</span>' : `<span class="pill st-${g.status}">${STATUS_LABEL[g.status] || g.status}</span>`;
@@ -137,7 +143,7 @@ const payeeOf = g => (g.payee_id && byId('payees', g.payee_id)) || S.payees.find
 const songStats = () => {
   const m = {};
   S.setlist_items.forEach(i => {
-    if (!i.played) return; const g = byId('gigs', i.gig_id); if (!g || g.status !== 'complete') return;
+    if (!i.played) return; const g = gigOf(byId('setlists', i.setlist_id)); if (!g || g.status !== 'complete') return;
     const s = m[i.song_id] || (m[i.song_id] = { plays: 0, last: null }); s.plays++; if (!s.last || g.gig_date > s.last) s.last = g.gig_date;
   });
   return m;
@@ -187,7 +193,7 @@ function attention() {
 /* ============================================================ shell */
 const ICON = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>',
-  gigs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  gigs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v4M8.5 21.5h7"/></svg>',
   cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
   set: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
   songs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/></svg>',
@@ -292,7 +298,7 @@ function homeView() {
     <section class="panel">
       <div class="row"><h2 class="sec" style="margin:0">Needs attention</h2><span class="spacer"></span><span class="small muted">${att.length} item${att.length === 1 ? '' : 's'}</span></div>
       <div class="list" style="margin-top:8px">${att.length ? att.slice(0, 14).map(a => `
-        <a class="li" href="${a.href || (a.act === 'Build set' ? '#setlist/' + a.g.id : a.act === 'Add practice' ? '#calendar' : '#gig/' + a.g.id)}" style="align-items:flex-start">
+        <a class="li" href="${a.href || (a.act === 'Build set' ? (listOf(a.g.id) ? '#setlist/' + listOf(a.g.id).id : '#gig/' + a.g.id) : a.act === 'Add practice' ? '#calendar' : '#gig/' + a.g.id)}" style="align-items:flex-start">
           <span class="sev ${a.sev}"></span>
           <div class="grow"><div class="t">${a.g ? esc(a.g.title) : 'Band'}</div><div class="small muted" style="white-space:normal">${esc(a.text)}</div></div>
           <span class="btn sm">${a.act}</span></a>`).join('') : '<div class="empty">All caught up. Nothing needs you right now.</div>'}
@@ -364,10 +370,10 @@ function gigView(id) {
   return `
   <div class="row" style="margin-bottom:6px"><a href="#gigs" class="small">← Gigs</a></div>
   ${title(practice ? 'Practice' : g.title, `${fmtDate(g.gig_date, true)}${g.start_time ? ' · ' + esc(g.start_time) : ''}${g.venue ? ' · ' + esc(g.venue) : ''}`)}
-  ${stepper}
+  <div class="row">${stepper}<span class="spacer"></span><button class="btn sm ghost" data-act="fold-all" data-v="1">Expand all</button><button class="btn sm ghost" data-act="fold-all" data-v="0">Collapse all</button></div>
   <div class="split" style="margin-top:14px">
    <div class="stack">
-    <section class="panel"><h2 class="sec">Details</h2>
+    <details class="panel fold" data-fold="details" ${foldOpen('details')}><summary><h2 class="sec">Details</h2><span class="sum">${esc([g.start_time, g.venue].filter(Boolean).join(' · '))}</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
       <div class="fgrid">
         ${practice ? '' : f('title', 'Name', 'text', 'w2')}
         ${f('gig_date', 'Date', 'date')}
@@ -377,9 +383,9 @@ function gigView(id) {
         ${practice ? '' : f('address', 'Address', 'text', 'w2')}
         <label class="f w4">${practice ? 'Plan' : 'Notes'}<textarea class="in" data-f="notes">${esc(g.notes || '')}</textarea></label>
       </div>
-    </section>
+    </div></details>
     ${practice ? '' : `
-    <section class="panel"><h2 class="sec">Client</h2>
+    <details class="panel fold" data-fold="client" ${foldOpen('client')}><summary><h2 class="sec">Client</h2><span class="sum">${esc([c.contact_name, c.org].filter(Boolean).join(' — ') || 'No client yet')}</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
       <div class="fgrid">
         <label class="f w2">Saved client<select class="in" data-f="client_id"><option value="">— New / none —</option>${S.clients.slice().sort((a, b) => (a.org || a.contact_name || '').localeCompare(b.org || b.contact_name || '')).map(x => `<option value="${x.id}" ${x.id === g.client_id ? 'selected' : ''}>${esc(x.org || x.contact_name)}${x.org && x.contact_name ? ' — ' + esc(x.contact_name) : ''}</option>`).join('')}</select></label>
         <label class="f">Invoice code<input class="in" data-c="code" value="${esc(c.code || '')}" placeholder="OUHSC"></label>
@@ -390,8 +396,8 @@ function gigView(id) {
         <label class="f w2">Street<input class="in" data-c="address1" value="${esc(c.address1 || '')}"></label>
         <label class="f w4">City, ST ZIP<input class="in" data-c="city_state_zip" value="${esc(c.city_state_zip || '')}"></label>
       </div>
-    </section>
-    <section class="panel"><h2 class="sec">Money</h2>
+    </div></details>
+    <details class="panel fold" data-fold="money" ${foldOpen('money')}><summary><h2 class="sec">Money</h2><span class="sum">${g.status === 'complete' ? money(gross(g)) + ' gross' + (balanceDue(g) ? ' · <b style="color:var(--gold)">' + money(balanceDue(g)) + ' due</b>' : '') : (g.quote ? money(g.quote) + ' quoted' : 'No quote yet') + (n0(g.deposit_amount) ? ' · deposit ' + (g.deposit_received ? 'in' : '<b style="color:var(--gold)">owed</b>') : '')}</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
       <div class="fgrid">
         ${f('quote', 'Quote $', 'number')}${f('hours', 'Hours', 'number')}
         ${f('deposit_amount', 'Deposit $', 'number')}
@@ -407,31 +413,35 @@ function gigView(id) {
         ${salesFor(g.id) ? `<div><div class="eyebrow">Logged merch sales</div><div class="num" style="font-size:20px;font-weight:700">${money(salesFor(g.id))}</div></div>` : ''}
         ${expensesFor(g.id) ? `<div><div class="eyebrow">Expenses</div><div class="num" style="font-size:20px;font-weight:700">${money(expensesFor(g.id), true)}</div></div>` : ''}
       </div>
-    </section>`}
+    </div></details>`}
     <div class="row"><button class="btn gold" data-act="save-gig">Save changes</button><span id="dirtyNote" class="small muted"></span><span class="spacer"></span>
       <span id="delWrap"><button class="btn danger sm" data-act="del-gig-ask">Delete</button></span></div>
    </div>
    <div class="stack">
     ${practice ? '' : `
-    <section class="panel"><h2 class="sec">Paperwork</h2>
+    <details class="panel fold" data-fold="paper" ${foldOpen('paper')}><summary><h2 class="sec">Paperwork</h2><span class="sum">${esc([g.quote_no ? 'Quote sent' : '', g.invoice_no ? 'Invoiced ' + mdY(g.invoiced_on) : ''].filter(Boolean).join(' · ') || 'Nothing sent')}</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
       <div class="stack">
         <div class="row"><div class="grow"><b>Quote</b><div class="small muted">${g.quote_no ? esc(g.quote_no) + ' · sent ' + mdY(g.quoted_on) : 'Not sent yet'}</div></div><button class="btn sm gold" data-act="pdf" data-v="quote">Quote PDF</button></div>
         <div class="row"><div class="grow"><b>Invoice</b><div class="small muted">${g.invoice_no ? esc(g.invoice_no) + ' · ' + mdY(g.invoiced_on) : 'Not invoiced yet'}</div></div><button class="btn sm gold" data-act="pdf" data-v="invoice">Invoice PDF</button></div>
         <div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="mail" data-v="quote">Quote email</button><button class="btn sm" data-act="mail" data-v="deposit">Deposit reminder</button><button class="btn sm" data-act="mail" data-v="details">Gig-week details</button><button class="btn sm" data-act="mail" data-v="invoice">Invoice email</button><button class="btn sm" data-act="mail" data-v="thanks">Thank-you</button></div>
         <p class="small faint" style="margin:0">Generating a PDF stamps the quote/invoice number and date on this gig.</p>
       </div>
-    </section>`}
-    <section class="panel"><h2 class="sec">Setlist</h2>
+    </div></details>`}
+    <details class="panel fold" data-fold="setlist" ${foldOpen('setlist')}><summary><h2 class="sec">Setlist</h2><span class="sum">${items.length ? items.length + ' songs' : '<span style="color:var(--gold)">None yet</span>'}</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
       ${items.length ? `<p class="muted" style="margin-top:0">${items.length} songs across ${new Set(items.map(i => i.set_no)).size} set(s) · about ${hm(totalDur + items.length * (st.song_buffer_sec || 10) / 60)} with transitions</p>` : `<p class="muted" style="margin-top:0">${g.songs_played_legacy ? g.songs_played_legacy + ' songs played (count from the old sheet).' : 'No setlist yet.'}</p>`}
-      <div class="row"><a class="btn sm gold" href="#setlist/${g.id}">${items.length ? 'Open setlist' : 'Build setlist'}</a></div>
-    </section>
-    <section class="panel"><h2 class="sec">Calendar</h2>
+      ${listOf(g.id) ? `<div class="row"><a class="btn sm gold" href="#setlist/${listOf(g.id).id}">Open setlist</a>${listOf(g.id).name ? `<span class="small muted">“${esc(listOf(g.id).name)}”</span>` : ''}</div>`
+        : `<div class="row"><button class="btn sm gold" data-act="sl-new" data-gig="${g.id}">New setlist</button>${S.setlists.some(l => !l.gig_id) ? `<select class="in" data-act-change="sl-attach" data-gig="${g.id}" style="width:auto;max-width:220px"><option value="">Use a saved draft…</option>${S.setlists.filter(l => !l.gig_id).map(l => `<option value="${l.id}">${esc(slName(l))} (${itemsOf(l.id).length})</option>`).join('')}</select>` : ''}</div>`}
+    </div></details>
+    <details class="panel fold" data-fold="cal" ${foldOpen('cal')}><summary><h2 class="sec">Calendar</h2><span class="sum">Add to your phone</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
       <div class="row"><button class="btn sm" data-act="ics-one">Add to my calendar (.ics)</button></div>
-    </section>
+    </div></details>
     ${practice || g.status !== 'complete' ? '' : payoutPanel(g)}
    </div>
   </div>`;
 }
+const FOLD_DEFAULT = { details: true, setlist: true, client: false, money: false, paper: false, cal: false, payout: false };
+const foldOpen = k => ((UI.folds || {})[k] ?? FOLD_DEFAULT[k]) ? 'open' : '';
+document.addEventListener('toggle', e => { const d = e.target; if (!d.matches || !d.matches('details[data-fold]')) return; UI.folds = { ...(UI.folds || {}), [d.dataset.fold]: d.open }; keepUI(); }, true);
 function lineItem(g, plain) {
   const st = settings();
   const tpl = g.line_item || st.default_line_item || 'Load-in, setup, soundcheck, music ({hours}hrs), load-out';
@@ -442,13 +452,13 @@ function payoutPanel(g) {
   const st = settings(), ms = activeMembers();
   const exp = expensesFor(g.id), fund = Math.max(0, gross(g) - exp) * n0(st.band_fund_pct) / 100;
   const each = ms.length ? (gross(g) - exp - fund) / ms.length : 0;
-  return `<section class="panel"><h2 class="sec">Payout split</h2>
+  return `<details class="panel fold" data-fold="payout" ${foldOpen('payout')}><summary><h2 class="sec">Payout split</h2><span class="sum">${ms.length ? money(each, true) + ' each' : ''}</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
     <table class="tbl"><tbody>
       <tr><td>Gross</td><td class="r num">${money(gross(g), true)}</td></tr>
       ${exp ? `<tr><td>Gig expenses</td><td class="r num">−${money(exp, true)}</td></tr>` : ''}
       ${fund ? `<tr><td>Band fund (${n0(st.band_fund_pct)}%)</td><td class="r num">−${money(fund, true)}</td></tr>` : ''}
       ${ms.map(m => `<tr><td>${esc(m.name)}</td><td class="r num">${money(each, true)}</td></tr>`).join('')}
-    </tbody></table></section>`;
+    </tbody></table></div></details>`;
 }
 
 /* ============================================================ calendar */
@@ -494,57 +504,166 @@ function calendarView() {
 }
 
 /* ============================================================ setlists */
+function slLi(L) {
+  const g = gigOf(L), n = itemsOf(L.id).length, d = g && pd(g.gig_date);
+  return `<a class="li" href="#setlist/${L.id}">
+    <div class="date">${d ? `<small>${MON[d.getMonth()]}</small><b>${d.getDate()}</b><small>${String(d.getFullYear()).slice(2)}</small>` : '<small>Draft</small>'}</div>
+    <div class="grow"><div class="t">${esc(slName(L))}</div><div class="s">${g ? (L.name && L.name !== g.title ? esc(g.title) + ' · ' : '') + esc(g.venue || STATUS_LABEL[g.status] || '') : 'Not assigned to a gig yet'}${L.notes ? ' · ' + esc(L.notes) : ''}</div></div>
+    <span class="small muted">${n} songs</span></a>`;
+}
 function setlistsView() {
   const t = todayIso();
-  const up = S.gigs.filter(g => isGig(g) && ['confirmed','quoted'].includes(g.status) && (!g.gig_date || g.gig_date >= t)).sort((a, b) => (a.gig_date || '9').localeCompare(b.gig_date || '9'));
-  const past = S.gigs.filter(g => isGig(g) && g.status === 'complete' && setItems(g.id).length).sort((a, b) => b.gig_date.localeCompare(a.gig_date));
-  const li = g => { const n = setItems(g.id).length; return gigLi(g).replace('</a>', '').replace(/<div class="amt[^]*?<\/div>/, '') + `<span class="small ${n ? 'muted' : ''}" style="${n ? '' : 'color:var(--gold)'}">${n ? n + ' songs' : 'Needs a set'}</span></a>`; };
-  return `${title('Setlists', 'Build sets from the song book, check timing against the slot, and print a stage copy.')}
-   <div class="grid g2">
-     <section class="panel"><h2 class="sec">Upcoming gigs</h2><div class="list">${up.map(g => li(g).replace(`href="#gig/${g.id}"`, `href="#setlist/${g.id}"`)).join('') || '<div class="empty">No booked gigs.</div>'}</div></section>
-     <section class="panel"><h2 class="sec">Past setlists</h2><div class="list">${past.map(g => li(g).replace(`href="#gig/${g.id}"`, `href="#setlist/${g.id}"`)).join('')}</div></section>
+  const drafts = S.setlists.filter(L => !L.gig_id).sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+  const up = S.gigs.filter(g => isGig(g) && ['confirmed','quoted','inquiry'].includes(g.status) && (!g.gig_date || g.gig_date >= t)).sort((a, b) => (a.gig_date || '9').localeCompare(b.gig_date || '9'));
+  const past = S.setlists.filter(L => { const g = gigOf(L); return g && !up.includes(g); }).sort((a, b) => (gigOf(b).gig_date || '').localeCompare(gigOf(a).gig_date || ''));
+  const upRow = g => { const L = listOf(g.id); if (L) return slLi(L); const d = pd(g.gig_date);
+    return `<div class="li"><div class="date">${d ? `<small>${MON[d.getMonth()]}</small><b>${d.getDate()}</b><small>${String(d.getFullYear()).slice(2)}</small>` : '<small>TBD</small>'}</div>
+      <div class="grow"><div class="t">${esc(g.title)}</div><div class="s" style="color:var(--gold)">Needs a setlist</div></div>
+      <button class="btn sm gold" data-act="sl-new" data-gig="${g.id}">New</button>
+      ${drafts.length ? `<select class="in" data-act-change="sl-attach" data-gig="${g.id}" style="width:auto;max-width:170px"><option value="">Use a draft…</option>${drafts.map(L => `<option value="${L.id}">${esc(slName(L))}</option>`).join('')}</select>` : ''}</div>`; };
+  return `${title('Setlists', 'Build a set any time — for a gig that isn’t booked yet, a showcase, or a go-to list — then assign it to a gig when one comes in.')}
+   <div class="row" style="margin-bottom:14px"><button class="btn gold" data-act="sl-new">+ New setlist</button><span class="small muted">Drafts aren’t tied to a gig until you assign them.</span></div>
+   <div class="grid g2" style="align-items:start">
+     <div class="stack">
+       <section class="panel"><h2 class="sec">Drafts</h2><div class="list">${drafts.map(slLi).join('') || '<div class="empty">No drafts. Start one with <b>+ New setlist</b>.</div>'}</div></section>
+       <section class="panel"><h2 class="sec">Upcoming gigs</h2><div class="list">${up.map(upRow).join('') || '<div class="empty">No upcoming gigs.</div>'}</div></section>
+     </div>
+     <section class="panel"><h2 class="sec">Past setlists</h2><div class="list">${past.map(slLi).join('') || '<div class="empty">Nothing yet.</div>'}</div></section>
    </div>`;
 }
+/* ----- show plan: sets, breaks, clock times ----- */
+function planOf(g) {                                    // g: a slCtx() setlist
+  const st = settings(), items = itemsOf(g.id);
+  const sets = Math.max(n0(g.set_count), ...items.map(i => i.set_no), 1);
+  const breaks = g.break_count != null ? Math.min(n0(g.break_count), Math.max(sets - 1, 0)) : Math.max(sets - 1, 0);
+  const breakMin = g.break_min != null ? n0(g.break_min) : n0(st.default_break_min ?? 15);
+  const slot = g.hours ? n0(g.hours) * 60 : null;                       // whole performance window, breaks included
+  const music = slot != null ? Math.max(slot - breaks * breakMin, 0) : sets * (n0(st.set_target_min) || 40);
+  return { sets, breaks, breakMin, slot, music, perSet: music / sets, buf: (st.song_buffer_sec ?? 10) / 60 };
+}
+const songDur = (s, buf) => n0(s && s.length_min) + buf;
+function runOfShow(g, plan, setDur) {
+  const t = parseTime(g.start_time); let clock = t ? t[0] * 60 + t[1] : null;
+  const fmt = m => { if (clock == null) return ''; m = Math.round(m); let h = Math.floor(m / 60) % 24, mi = m % 60; const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}:${String(mi).padStart(2, '0')}${ap}`; };
+  const out = [];
+  for (let n = 1; n <= plan.sets; n++) {
+    const d = setDur[n] != null ? setDur[n] : plan.perSet;
+    out.push({ kind: 'set', n, from: fmt(clock), to: fmt(clock + d), dur: d }); if (clock != null) clock += d;
+    if (n < plan.sets && n <= plan.breaks) { out.push({ kind: 'break', from: fmt(clock), to: fmt(clock + plan.breakMin), dur: plan.breakMin }); if (clock != null) clock += plan.breakMin; }
+  }
+  return out;
+}
+/* ----- flow analysis: what changes between two songs played back to back ----- */
+const normPart = v => String(v || '').trim().toLowerCase();
+function changes(a, b) {
+  const out = { inst: [], tuning: false, sameKey: false, capo: false, sameVox: false, sameGenre: false };
+  if (!a || !b) return out;
+  const pa = a.parts || {}, pb = b.parts || {};
+  activeMembers().forEach(m => { const x = normPart(pa[m.name]), y = normPart(pb[m.name]); if (x && y && x !== y) out.inst.push({ who: m.name, from: pa[m.name], to: pb[m.name] }); });
+  out.tuning = (a.tuning || 'Standard') !== (b.tuning || 'Standard');
+  out.sameKey = !!a.song_key && a.song_key === b.song_key;
+  out.capo = n0(a.capo) !== n0(b.capo);
+  out.sameVox = !!a.lead_vox && a.lead_vox === b.lead_vox;
+  out.sameGenre = !!a.genre && a.genre === b.genre;
+  return out;
+}
+function flowStats(setsSongs) {
+  const r = { inst: 0, tuning: 0, sameKey: 0, voxRuns: 0, genreRuns: 0 };
+  setsSongs.forEach(list => list.forEach((s, i) => {
+    if (!i) return; const c = changes(list[i - 1], s);
+    r.inst += c.inst.length; r.tuning += c.tuning ? 1 : 0; r.sameKey += c.sameKey ? 1 : 0;
+    if (i >= 2 && c.sameVox && list[i - 2].lead_vox === s.lead_vox) r.voxRuns++;
+    if (i >= 2 && c.sameGenre && list[i - 2].genre === s.genre) r.genreRuns++;
+  }));
+  return r;
+}
+const flowChips = (f) => `<div class="chips small">
+  <span class="pill" style="color:${f.inst ? 'var(--gold)' : 'var(--ok)'}">${f.inst} instrument swap${f.inst === 1 ? '' : 's'}</span>
+  <span class="pill" style="color:${f.tuning ? 'var(--bad)' : 'var(--ok)'}">${f.tuning} retune${f.tuning === 1 ? '' : 's'} in a set</span>
+  <span class="pill" style="color:${f.sameKey ? 'var(--gold)' : 'var(--ok)'}">${f.sameKey} same-key pair${f.sameKey === 1 ? '' : 's'}</span>
+  <span class="pill" style="color:${f.voxRuns ? 'var(--gold)' : 'var(--ok)'}">${f.voxRuns} 3-in-a-row singer</span>
+  <span class="pill" style="color:${f.genreRuns ? 'var(--gold)' : 'var(--ok)'}">${f.genreRuns} 3-in-a-row genre</span></div>`;
+
 function setlistView(id) {
-  const g = byId('gigs', id);
-  if (!g) return `${title('Not found')}<a href="#setlists">Back</a>`;
-  const st = settings(), items = setItems(id), buf = (st.song_buffer_sec ?? 10) / 60;
-  const setNos = [...new Set(items.map(i => i.set_no))]; const maxSet = Math.max(n0(g.set_count), ...setNos, 1);
-  const sets = Array.from({ length: maxSet }, (_, i) => i + 1);
-  if (UI.selSet > maxSet) UI.selSet = 1;
+  const L = byId('setlists', id);
+  if (!L) return `${title('Not found')}<p class="muted">That setlist may have been deleted. <a href="#setlists">Back to setlists</a></p>`;
+  const gig = gigOf(L), g = slCtx(L);
+  const items = itemsOf(id), plan = planOf(g), buf = plan.buf;
+  const sets = Array.from({ length: plan.sets }, (_, i) => i + 1);
+  if (UI.selSet > plan.sets) UI.selSet = 1;
   const used = new Set(items.map(i => i.song_id));
-  const target = g.hours ? Math.round(n0(g.hours) * 60 / sets.length) : (n0(st.set_target_min) || 40);
+  const target = plan.perSet;
+  const setDur = {}; sets.forEach(n => setDur[n] = items.filter(i => i.set_no === n && i.played).reduce((a, i) => a + songDur(byId('songs', i.song_id), buf), 0));
+  const ros = runOfShow(g, plan, Object.fromEntries(sets.map(n => [n, setDur[n] || plan.perSet])));
+  const flow = flowStats(sets.map(n => items.filter(i => i.set_no === n && i.played).map(i => byId('songs', i.song_id)).filter(Boolean)));
   const setCards = sets.map(n => {
-    const its = items.filter(i => i.set_no === n);
-    const dur = its.reduce((a, i) => a + (i.played ? n0((byId('songs', i.song_id) || {}).length_min) + buf : 0), 0);
+    const its = items.filter(i => i.set_no === n), dur = setDur[n];
+    const over = dur > target + 2, slot = ros.find(r => r.kind === 'set' && r.n === n);
+    const brk = ros[ros.indexOf(slot) + 1];
+    let prev = null;
     return `<section class="panel set ${UI.selSet === n ? 'sel' : ''}" data-act="sel-set" data-v="${n}">
-      <div class="row"><h3>Set ${n}</h3><span class="spacer"></span><span class="small num ${dur > target ? '' : 'muted'}" style="${dur > target ? 'color:var(--bad)' : ''}">${hm(dur)} / ${target}m</span></div>
-      <div class="bar"><i class="${dur > target ? 'over' : ''}" style="width:${Math.min(100, dur / target * 100)}%"></i></div>
-      ${its.map((i, k) => { const s = byId('songs', i.song_id) || { title: '(deleted song)' }; return `
+      <div class="row"><h3>Set ${n}</h3>${slot && slot.from ? `<span class="small muted">${slot.from}–${slot.to}</span>` : ''}<span class="spacer"></span><span class="small num" style="color:${over ? 'var(--bad)' : dur < target - 5 ? 'var(--muted)' : 'var(--ok)'}">${hm(dur)} / ${hm(target)}</span></div>
+      <div class="bar"><i class="${over ? 'over' : ''}" style="width:${Math.min(100, dur / Math.max(target, 1) * 100)}%"></i></div>
+      ${its.map((i, k) => { const s = byId('songs', i.song_id) || { title: '(deleted song)' }; const c = i.played ? changes(prev, s) : changes(null, null); if (i.played) prev = s;
+        const warn = [c.tuning ? `<span style="color:var(--bad)">retune → ${esc(s.tuning || 'Standard')}</span>` : '', ...c.inst.map(x => `<span style="color:var(--gold)">${esc(x.who)}: ${esc(x.to)}</span>`)].filter(Boolean).join(' · ');
+        return `
         <div class="song ${i.played ? '' : 'unplayed'}">
           <span class="n">${k + 1}</span>
-          <div style="min-width:0"><div class="nm">${esc(s.title)}</div><div class="meta">${esc(songLabel(s))} · ${mins(s.length_min)} · ${esc(s.lead_vox || '')}${s.starter ? ' · starts: ' + esc(s.starter) : ''}</div></div>
+          <div style="min-width:0"><div class="nm">${i.pinned ? '<span title="Pinned — the optimizer keeps it here" style="color:var(--gold)">⚑ </span>' : ''}${esc(s.title)}</div>
+            <div class="meta">${esc(songLabel(s))} · ${mins(s.length_min)} · ${esc(s.lead_vox || '')}${s.genre ? ' · ' + esc(s.genre) : ''}${s.energy ? ' · ' + '▮'.repeat(s.energy) : ''}</div>
+            ${warn ? `<div class="meta">⇄ ${warn}</div>` : ''}</div>
           <div class="acts">
             <button class="ib" title="Move up" data-act="si-move" data-id="${i.id}" data-v="-1">▲</button>
             <button class="ib" title="Move down" data-act="si-move" data-id="${i.id}" data-v="1">▼</button>
             ${sets.length > 1 ? `<button class="ib" title="Move to next set" data-act="si-set" data-id="${i.id}">⇄</button>` : ''}
+            <button class="ib" title="${i.pinned ? 'Unpin' : 'Pin here (optimizer won’t move it)'}" data-act="si-pin" data-id="${i.id}" style="${i.pinned ? 'color:var(--gold)' : ''}">⚑</button>
             <button class="ib" title="${i.played ? 'Mark skipped' : 'Mark played'}" data-act="si-played" data-id="${i.id}">${i.played ? '✓' : '○'}</button>
             <button class="ib" title="Remove" data-act="si-del" data-id="${i.id}">✕</button>
-          </div></div>`; }).join('') || '<p class="small muted">Click songs in the book to add them here.</p>'}
+          </div></div>`; }).join('') || '<p class="small muted">Click songs in the book to add them here, or let the optimizer build it.</p>'}
+      ${brk && brk.kind === 'break' ? `<div class="small muted" style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">Break · ${brk.dur} min${brk.from ? ` · ${brk.from}–${brk.to}` : ''}</div>` : ''}
     </section>`;
   }).join('');
-  const others = S.gigs.filter(x => x.id !== id && setItems(x.id).length).sort((a, b) => (b.gig_date || '').localeCompare(a.gig_date || ''));
+  const others = S.setlists.filter(x => x.id !== id && itemsOf(x.id).length).sort((a, b) => ((gigOf(b) || {}).gig_date || b.updated_at || '').localeCompare((gigOf(a) || {}).gig_date || a.updated_at || ''));
+  const openGigs = S.gigs.filter(x => isGig(x) && !listOf(x.id) && live(x)).sort((a, b) => (a.gig_date || '9').localeCompare(b.gig_date || '9'));
   const q = UI.libSearch.toLowerCase();
   const stats = songStats();
-  const lib = S.songs.filter(s => (UI.libFilter === 'all' || s.status === UI.libFilter) && (!q || (s.title + ' ' + (s.artist || '')).toLowerCase().includes(q)))
+  const lib = S.songs.filter(s => (UI.libFilter === 'all' || s.status === UI.libFilter) && (!q || (s.title + ' ' + (s.artist || '') + ' ' + (s.genre || '')).toLowerCase().includes(q)))
     .sort((a, b) => (a.default_set || 99) - (b.default_set || 99) || (a.default_order || 999) - (b.default_order || 999) || a.title.localeCompare(b.title));
-  const total = items.filter(i => i.played).reduce((a, i) => a + n0((byId('songs', i.song_id) || {}).length_min) + buf, 0);
-  return `<div class="row" style="margin-bottom:6px"><a href="#gig/${g.id}" class="small">← ${esc(g.title)}</a></div>
-  ${title('Setlist', `${esc(g.title)} · ${fmtDate(g.gig_date)} · ${items.length} songs · ${hm(total)} of music${g.hours ? ' for a ' + g.hours + '-hour slot' : ''}`)}
+  const total = Object.values(setDur).reduce((a, b) => a + b, 0);
+  const pf = (k, l, v, extra = '') => `<label class="f">${l}<input class="in" type="number" min="0" step="any" data-plan="${k}" value="${esc(v ?? '')}" ${extra}></label>`;
+  return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="small">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
+  ${title(slName(L), `Setlist · ${items.length} songs · ${hm(total)} of music`)}
+  <section class="panel" style="margin-bottom:14px">
+    <div class="row" style="align-items:flex-end;gap:12px">
+      <label class="f grow" style="min-width:200px">Setlist name<input class="in" id="slName" value="${esc(L.name || '')}" placeholder="${esc(gig ? gig.title : 'e.g. Wedding — 2 × 60')}"></label>
+      <label class="f grow" style="min-width:200px">Notes<input class="in" id="slNotes" value="${esc(L.notes || '')}" placeholder="Who it's for, vibe, requests"></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      ${gig ? `<span>Assigned to <a href="#gig/${gig.id}"><b>${esc(gig.title)}</b></a> · ${fmtDate(gig.gig_date)}</span> ${statusPill(gig)}<button class="btn sm" data-act="sl-unassign">Unassign</button>`
+        : `<span class="muted">Not assigned to a gig.</span><select class="in" id="slAssign" style="width:auto;max-width:300px"><option value="">Assign to gig…</option>${openGigs.map(x => `<option value="${x.id}">${esc(x.title)} (${x.gig_date ? mdY(x.gig_date) : 'date TBD'})</option>`).join('')}</select>`}
+      <span class="spacer"></span>
+      <button class="btn sm" data-act="sl-dup">Duplicate</button>
+      <span id="slDelWrap"><button class="btn sm danger" data-act="sl-del-ask">Delete setlist</button></span>
+    </div>
+  </section>
+  <section class="panel" style="margin-bottom:14px">
+    <div class="plangrid">
+        <label class="f">Start<input class="in" data-plan="start_time" value="${esc(g.start_time || '')}" placeholder="7pm"></label>
+        ${pf('hours', 'Slot (hours)', g.hours)}
+        ${pf('set_count', 'Sets', plan.sets, 'step="1" min="1"')}
+        ${pf('break_count', 'Breaks', plan.breaks, 'step="1"')}
+        ${pf('break_min', 'Break (min)', plan.breakMin, 'step="1"')}
+        <div class="row plan-acts"><button class="btn sm" data-act="plan-save">Update plan</button><button class="btn gold" data-act="opt-open">Optimize setlist</button></div>
+    </div>
+    <div class="row small muted" style="margin-top:12px;gap:6px 14px">
+      ${plan.slot != null ? `<span><b class="num" style="color:var(--cream)">${hm(plan.music)}</b> of music in a ${hm(plan.slot)} slot → <b class="num" style="color:var(--cream)">${hm(plan.perSet)}</b> per set</span>` : `<span>Set a slot length to size the sets (using ${hm(plan.perSet)} per set for now).</span>`}
+      <span class="spacer"></span>
+      ${ros.map(r => r.kind === 'set' ? `<span><b style="color:var(--gold)">Set ${r.n}</b> ${r.from ? r.from + '–' + r.to : hm(r.dur)}</span>` : `<span>Break ${r.from ? r.from + '–' + r.to : r.dur + 'm'}</span>`).join('<span class="faint">·</span>')}
+    </div>
+    ${items.length ? `<div style="margin-top:12px">${flowChips(flow)}</div>` : ''}
+  </section>
   <div class="row" style="margin-bottom:14px">
-    <button class="btn sm" data-act="set-add">+ Add set</button>
-    ${sets.length > 1 ? `<button class="btn sm" data-act="set-drop">− Remove last set</button>` : ''}
-    <select class="in" id="copyFrom" style="width:auto;max-width:260px"><option value="">Copy from another gig…</option>${others.map(o => `<option value="${o.id}">${esc(o.title)} (${mdY(o.gig_date)})</option>`).join('')}</select>
+    <select class="in" id="copyFrom" style="width:auto;max-width:260px"><option value="">Copy from another setlist…</option>${others.map(o => { const og = gigOf(o); return `<option value="${o.id}">${esc(slName(o))}${og && og.gig_date ? ' (' + mdY(og.gig_date) + ')' : ' (draft)'}</option>`; }).join('')}</select>
     <button class="btn sm" data-act="set-default">Fill from default order</button>
     <span class="spacer"></span>
     <button class="btn sm gold" data-act="set-pdf">Stage PDF</button><button class="btn sm" data-act="set-text">Copy as text</button>
@@ -554,22 +673,137 @@ function setlistView(id) {
     <div class="sets">${setCards}</div>
     <section class="panel" style="position:sticky;top:90px">
       <div class="row"><h2 class="sec" style="margin:0">Song book</h2><span class="spacer"></span><span class="small muted">adds to Set ${UI.selSet}</span></div>
-      <div class="row" style="margin:10px 0"><input class="in" id="libSearch" placeholder="Search songs" value="${esc(UI.libSearch)}">
+      <div class="row" style="margin:10px 0"><input class="in" id="libSearch" placeholder="Search songs or genre" value="${esc(UI.libSearch)}">
         <div class="chips">${[['active','Active'],['bench','Bench'],['holiday','Holiday'],['all','All']].map(([k, l]) => `<button class="chip ${UI.libFilter === k ? 'on' : ''}" data-act="lib-filter" data-v="${k}">${l}</button>`).join('')}</div></div>
       <div class="lib">${lib.map(s => `<div class="libi ${used.has(s.id) ? 'used' : ''}" data-act="lib-add" data-id="${s.id}">
-         <div class="grow"><div style="font-weight:600">${esc(s.title)}</div><div class="small muted">${esc(s.artist || '')} · ${esc(songLabel(s))} · ${mins(s.length_min)}</div></div>
+         <div class="grow"><div style="font-weight:600">${esc(s.title)}</div><div class="small muted">${esc(s.artist || '')} · ${esc(songLabel(s))} · ${mins(s.length_min)}${s.genre ? ' · ' + esc(s.genre) : ''}</div></div>
          <div style="text-align:right"><div class="stars ro">${starsRO(avgRating(s.id))}</div><div class="small faint">${(stats[s.id] || {}).plays || 0} plays</div></div></div>`).join('')}</div>
     </section>
   </div>`;
 }
+
+/* ============================================================ optimizer */
+const OPT_DEFAULT = { pools: { active: true, bench: false, learning: false, holiday: false }, shape: 'build', keepPinned: true,
+  w: { energy: 2, inst: 2, tuning: 3, key: 1, vox: 1, genre: 1, rating: 2, fresh: 1 } };
+const SHAPES = { build: 'Start easy, finish big', party: 'High energy all night', dinner: 'Dinner first, then dance', waves: 'Each set builds' };
+const WLAB = { energy: 'Energy arc', inst: 'Fewer instrument swaps', tuning: 'Group tunings (retune only at breaks)', key: 'Vary keys back-to-back', vox: 'Mix lead singers', genre: 'Spread genres', rating: 'Favor top-rated songs', fresh: 'Rest songs from the last gig' };
+function optPrefs(g) {
+  const p = JSON.parse(JSON.stringify(OPT_DEFAULT)); const saved = (g.plan && g.plan.opt) || {};   // g: slCtx()
+  Object.assign(p.pools, saved.pools || {}); Object.assign(p.w, saved.w || {}); if (saved.shape) p.shape = saved.shape; if (saved.keepPinned != null) p.keepPinned = saved.keepPinned;
+  if (!saved.pools && g.gig_date && /-12-/.test(g.gig_date)) p.pools.holiday = true;
+  return p;
+}
+function energyTarget(shape, k, sets, p) {           // k: 0-based set, p: 0..1 position within set
+  const night = (k + p) / sets;
+  let t;
+  if (shape === 'party') t = 4.2;
+  else if (shape === 'dinner') t = night < .5 ? 2 + night : 2.6 + (night - .5) * 4.6;
+  else if (shape === 'waves') t = 2.3 + 2.4 * p;
+  else t = 2.2 + 2.6 * night;
+  if (p < 0.12) t += 0.7;                              // open each set with something that grabs the room
+  if (p > 0.85) t += 0.9;                              // close each set strong
+  return Math.min(5, t);
+}
+function optimizeSetlist(g, prefs, seed) {
+  let rnd = (seed || Date.now()) % 2147483647; const rand = () => (rnd = rnd * 48271 % 2147483647) / 2147483647;
+  const plan = planOf(g), buf = plan.buf, W = prefs.w;
+  const items = itemsOf(g.id);
+  const pinned = prefs.keepPinned ? items.filter(i => i.pinned) : [];
+  const pinnedIds = new Set(pinned.map(i => i.song_id));
+  const lastGig = S.gigs.filter(x => isGig(x) && x.status === 'complete' && x.id !== g.gig_id && setItems(x.id).length && x.gig_date <= (g.gig_date || todayIso())).sort((a, b) => b.gig_date.localeCompare(a.gig_date))[0];
+  const lastSet = new Set(lastGig ? setItems(lastGig.id).map(i => i.song_id) : []);
+  const pool = S.songs.filter(s => prefs.pools[s.status] && !pinnedIds.has(s.id) && n0(s.length_min) > 0);
+  const score = s => { const r = avgRating(s.id); return W.rating * ((r == null ? 3 : r) - 3) * 1.4 - (lastSet.has(s.id) ? W.fresh * 0.8 : 0) + ({ active: 3, holiday: 2, learning: 0.5 }[s.status] || 0); };   // active rotation first; bench fills gaps
+  const sc = new Map(pool.map(s => [s.id, score(s)]));
+  // --- pick songs to fill the music time
+  const pinDur = pinned.reduce((a, i) => a + songDur(byId('songs', i.song_id), buf), 0);
+  const need = plan.music - pinDur;
+  const ranked = pool.slice().sort((a, b) => (sc.get(b.id) + rand() * .8) - (sc.get(a.id) + rand() * .8));
+  const chosen = []; let tot = 0;
+  for (const s of ranked) { const d = songDur(s, buf); if (tot + d <= need + 1.5) { chosen.push(s); tot += d; } if (tot >= need - 1) break; }
+  const bench = pool.filter(s => !chosen.includes(s));
+  // --- state: unpinned songs per set; pinned anchored by index
+  const N = plan.sets, sets = Array.from({ length: N }, () => []);
+  chosen.slice().sort((a, b) => n0(a.energy) - n0(b.energy)).forEach((s, i) => sets[Math.min(N - 1, Math.floor(i * N / chosen.length))].push(s));
+  sets.forEach(l => l.sort(() => rand() - .5));
+  const pins = Array.from({ length: N }, () => []);
+  pinned.forEach(i => { const k = Math.min(i.set_no, N) - 1; pins[k].push({ idx: items.filter(x => x.set_no === i.set_no).indexOf(i), song: byId('songs', i.song_id) }); });
+  const full = k => { const l = sets[k].slice(); pins[k].slice().sort((a, b) => a.idx - b.idx).forEach(p => l.splice(Math.min(p.idx, l.length), 0, p.song)); return l; };
+  const cost = () => {
+    let c = 0;
+    for (let k = 0; k < N; k++) {
+      const l = full(k); const dur = l.reduce((a, s) => a + songDur(s, buf), 0);
+      c += Math.pow(dur - plan.perSet, 2) * 0.35 + (dur > plan.perSet + 3 ? (dur - plan.perSet - 3) * 4 : 0);
+      l.forEach((s, i) => {
+        if (W.energy && s.energy) c += W.energy * 0.55 * Math.pow(s.energy - energyTarget(prefs.shape, k, N, l.length > 1 ? i / (l.length - 1) : 0), 2);
+        if (!i) return; const x = changes(l[i - 1], s);
+        c += W.inst * 1.6 * x.inst.length + (x.tuning ? W.tuning * 7 : 0) + (x.sameKey ? W.key * 1.4 : 0) + (x.capo ? W.key * 0.25 : 0) + (x.sameVox ? W.vox * 0.8 : 0) + (x.sameGenre ? W.genre * 0.7 : 0);
+        if (i >= 2) { if (x.sameVox && l[i - 2].lead_vox === s.lead_vox) c += W.vox * 1.8; if (x.sameGenre && l[i - 2].genre === s.genre) c += W.genre * 1.6; }
+      });
+      c -= sets[k].reduce((a, s) => a + sc.get(s.id), 0);
+    }
+    return c;
+  };
+  let cur = cost(), best = cur, bestSets = sets.map(l => l.slice());
+  const iters = 24000;
+  for (let it = 0; it < iters; it++) {
+    const T = 4 * Math.pow(0.012, it / iters);
+    const r = rand(); let undo;
+    const ka = Math.floor(rand() * N), la = sets[ka];
+    if (r < 0.55) {                                    // swap two songs (any sets)
+      const kb = Math.floor(rand() * N), lb = sets[kb]; if (!la.length || !lb.length) continue;
+      const a = Math.floor(rand() * la.length), b = Math.floor(rand() * lb.length); if (ka === kb && a === b) continue;
+      [la[a], lb[b]] = [lb[b], la[a]]; undo = () => { [la[a], lb[b]] = [lb[b], la[a]]; };
+    } else if (r < 0.8) {                              // move a song to another spot
+      if (!la.length) continue; const kb = Math.floor(rand() * N), lb = sets[kb];
+      const a = Math.floor(rand() * la.length); const [s] = la.splice(a, 1); const b = Math.floor(rand() * (lb.length + 1)); lb.splice(b, 0, s);
+      undo = () => { lb.splice(b, 1); la.splice(a, 0, s); };
+    } else {                                           // trade a chosen song for one on the bench
+      if (!la.length || !bench.length) continue; const a = Math.floor(rand() * la.length), b = Math.floor(rand() * bench.length);
+      [la[a], bench[b]] = [bench[b], la[a]]; undo = () => { [la[a], bench[b]] = [bench[b], la[a]]; };
+    }
+    const nc = cost();
+    if (nc <= cur || rand() < Math.exp((cur - nc) / T)) { cur = nc; if (nc < best) { best = nc; bestSets = sets.map(l => l.slice()); } } else undo();
+  }
+  bestSets.forEach((l, k) => sets[k] = l);
+  const result = Array.from({ length: N }, (_, k) => full(k));
+  return { result, plan, flow: flowStats(result), durs: result.map(l => l.reduce((a, s) => a + songDur(s, buf), 0)), lastGig };
+}
+function optModal(g, prefs, res) {
+  const chk = (path, label, on) => `<label class="check"><input type="checkbox" data-opt="${path}" ${on ? 'checked' : ''}> ${label}</label>`;
+  const lvl = k => `<div class="row" style="justify-content:space-between;gap:8px"><span class="small">${WLAB[k]}</span><div class="chips">${[['0','Off'],['1','Low'],['2','Med'],['3','High']].map(([v, l]) => `<button class="chip ${String(prefs.w[k]) === v ? 'on' : ''}" data-act="opt-w" data-k="${k}" data-v="${v}">${l}</button>`).join('')}</div></div>`;
+  const ros = res ? runOfShow(g, res.plan, Object.fromEntries(res.durs.map((d, i) => [i + 1, d]))) : [];
+  return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(980px,100%)">
+    <div class="row"><h2 class="sec" style="margin:0">Optimize setlist</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div>
+    <div class="grid g2" style="margin-top:14px;align-items:start">
+      <div class="stack">
+        <div><div class="eyebrow" style="margin-bottom:6px">Song pool</div><div class="row">${chk('pools.active', 'Active', prefs.pools.active)}${chk('pools.bench', 'Bench', prefs.pools.bench)}${chk('pools.learning', 'Learning', prefs.pools.learning)}${chk('pools.holiday', 'Holiday', prefs.pools.holiday)}</div></div>
+        <div><div class="eyebrow" style="margin-bottom:6px">Energy shape</div><div class="chips">${Object.entries(SHAPES).map(([k, l]) => `<button class="chip ${prefs.shape === k ? 'on' : ''}" data-act="opt-shape" data-v="${k}">${l}</button>`).join('')}</div></div>
+        <div class="stack" style="margin-top:4px">${Object.keys(WLAB).map(lvl).join('')}</div>
+        ${chk('keepPinned', 'Keep pinned songs (⚑) where they are', prefs.keepPinned)}
+        <div class="row"><button class="btn gold" data-act="opt-run">${res ? 'Try another version' : 'Build it'}</button><span class="small faint">Uses each song’s genre, energy, key, tuning, singer, parts, length and the band’s ratings.</span></div>
+      </div>
+      <div>${res ? `
+        <div class="eyebrow" style="margin-bottom:6px">Proposed — ${res.result.reduce((a, l) => a + l.length, 0)} songs</div>
+        ${flowChips(res.flow)}
+        ${(() => { const short = res.plan.music - res.durs.reduce((a, b) => a + b, 0); return short > 3 ? `<p class="small" style="color:var(--gold);margin:8px 0 0">About ${hm(short)} short of the slot — the pool ran out of songs. Tick Bench (or Learning) to fill it, or plan on a longer break.</p>` : ''; })()}
+        <div class="stack" style="margin-top:10px;max-height:52vh;overflow:auto">${res.result.map((l, k) => { const r = ros.find(x => x.kind === 'set' && x.n === k + 1); let prev = null; return `<div>
+          <div class="row"><b style="color:var(--gold)">Set ${k + 1}</b><span class="small muted">${r && r.from ? r.from + '–' + r.to + ' · ' : ''}${hm(res.durs[k])} / ${hm(res.plan.perSet)}</span></div>
+          ${l.map((s, i) => { const c = changes(prev, s); prev = s; return `<div class="small" style="display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;padding:3px 0;border-top:1px solid var(--line-soft)"><span class="faint num">${i + 1}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title)} <span class="faint">${esc(s.song_key || '')}${s.capo ? '/' + s.capo : ''} · ${esc(s.lead_vox || '')}${c.inst.length ? ' · ⇄ ' + c.inst.map(x => esc(x.who)).join(', ') : ''}${c.tuning ? ' · retune' : ''}</span></span><span class="faint">${'▮'.repeat(s.energy || 0)}</span></div>`; }).join('')}</div>`; }).join('')}</div>
+        ${res.lastGig && prefs.w.fresh ? `<p class="small faint">Resting songs from ${esc(res.lastGig.title)} where it helps.</p>` : ''}
+        <div class="row" style="margin-top:12px"><button class="btn gold" data-act="opt-apply">Use this setlist</button><span class="small faint">Replaces the unpinned songs on this gig.</span></div>`
+      : '<div class="empty">Pick what matters and hit <b>Build it</b>. Nothing changes until you choose “Use this setlist”.</div>'}</div>
+    </div></div></div>`;
+}
+
 const starsRO = v => [1, 2, 3, 4, 5].map(i => `<button tabindex="-1" class="${v && v >= i - .25 ? 'on' : ''}">★</button>`).join('');
 
 /* ============================================================ songs */
 function songsView() {
   const stats = songStats(), q = UI.songSearch.toLowerCase(), f = UI.songFilter;
-  let rows = S.songs.filter(s => (f === 'all' || s.status === f) && (!q || [s.title, s.artist, s.lead_vox, s.starter].join(' ').toLowerCase().includes(q)));
+  let rows = S.songs.filter(s => (f === 'all' || s.status === f) && (!q || [s.title, s.artist, s.lead_vox, s.starter, s.genre].join(' ').toLowerCase().includes(q)));
   const key = UI.songSort, dir = UI.songSortDir === 'desc' ? -1 : 1;
-  const val = s => ({ title: s.title, artist: s.artist || '', key: s.song_key || '', length: n0(s.length_min), lead: s.lead_vox || '', mine: myRating(s.id), avg: avgRating(s.id) || 0, plays: (stats[s.id] || {}).plays || 0, last: (stats[s.id] || {}).last || '', year: s.year || 0 }[key]);
+  const val = s => ({ title: s.title, artist: s.artist || '', key: s.song_key || '', length: n0(s.length_min), lead: s.lead_vox || '', mine: myRating(s.id), avg: avgRating(s.id) || 0, genre: (s.genre || '') + (9 - n0(s.energy)), plays: (stats[s.id] || {}).plays || 0, last: (stats[s.id] || {}).last || '', year: s.year || 0 }[key]);
   rows.sort((a, b) => { const x = val(a), y = val(b); return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * dir; });
   const counts = Object.fromEntries(['active','bench','learning','retired','holiday'].map(k => [k, S.songs.filter(s => s.status === k).length]));
   const th = (k, l, cls = '') => `<th data-sort="${k}" class="${cls}">${l}${UI.songSort === k ? (dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
@@ -580,12 +814,13 @@ function songsView() {
     <span class="spacer"></span><input class="in" id="songSearch" placeholder="Search title, artist, singer" value="${esc(UI.songSearch)}" style="width:220px"><button class="btn gold" data-act="song-new">+ Song</button>
   </div>
   <section class="panel"><div class="tbl-wrap"><table class="tbl">
-    <thead><tr>${th('title', 'Song')}${th('key', 'Key')}${th('length', 'Len', 'r')}${th('lead', 'Lead vox', 'hide-sm')}${th('mine', 'Your rating')}${th('avg', 'Band', 'hide-sm')}${th('plays', 'Plays', 'r')}${th('last', 'Last played', 'hide-sm')}</tr></thead>
+    <thead><tr>${th('title', 'Song')}${th('key', 'Key')}${th('length', 'Len', 'r')}${th('lead', 'Lead vox', 'hide-sm')}${th('genre', 'Genre', 'hide-sm')}${th('mine', 'Your rating')}${th('avg', 'Band', 'hide-sm')}${th('plays', 'Plays', 'r')}${th('last', 'Last played', 'hide-sm')}</tr></thead>
     <tbody>${rows.map(s => { const r = ratingsFor(s.id); return `<tr class="click" data-act="song-edit" data-id="${s.id}">
       <td><b>${esc(s.title)}</b><div class="small muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></td>
       <td class="num">${esc(s.song_key || '')}${s.capo ? `<div class="small muted">capo ${s.capo}</div>` : ''}</td>
       <td class="r num">${mins(s.length_min)}</td>
       <td class="hide-sm">${esc(s.lead_vox || '')}</td>
+      <td class="hide-sm small">${esc(s.genre || '')}<div class="faint" title="Energy ${s.energy || '?'} of 5">${'▮'.repeat(s.energy || 0)}</div></td>
       <td><div class="stars" data-stop>${[1, 2, 3, 4, 5].map(i => `<button class="${myRating(s.id) >= i ? 'on' : ''}" data-act="rate" data-id="${s.id}" data-v="${i}" aria-label="${i} stars">★</button>`).join('')}</div></td>
       <td class="hide-sm" title="${r.map(x => (byId('members', x.member_id) || {}).name + ': ' + x.rating).join(', ')}"><span class="num">${avgRating(s.id) ? avgRating(s.id).toFixed(1) : '—'}</span> <span class="small faint">${r.length}/${ms.length}</span></td>
       <td class="r num">${(stats[s.id] || {}).plays || 0}</td>
@@ -603,6 +838,9 @@ function songModal(s) {
       ${f('song_key', 'Key')}${f('capo', 'Capo', 'number')}
       <label class="f">Length (m:ss)<input class="in" data-s="length_fmt" value="${s.length_min ? mins(s.length_min) : ''}" placeholder="3:45"></label>
       ${f('lead_vox', 'Lead vox', 'text', 'w2')}${f('starter', 'Starts it', 'text', 'w2')}
+      <label class="f w2">Genre<input class="in" data-s="genre" list="genreList" value="${esc(s.genre || '')}"><datalist id="genreList">${[...new Set(S.songs.map(x => x.genre).filter(Boolean))].sort().map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
+      <label class="f">Energy (1–5)<select class="in" data-s="energy"><option value="">—</option>${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${s.energy === n ? 'selected' : ''}>${n} ${['', 'mellow', 'easy', 'groove', 'lively', 'barn-burner'][n]}</option>`).join('')}</select></label>
+      <label class="f">Tuning<select class="in" data-s="tuning">${['Standard', 'Half step down', 'Drop D', 'Other'].map(x => `<option ${(s.tuning || 'Standard') === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
       ${f('year', 'Year', 'number')}${f('added_on', 'Learned', 'date')}${f('default_set', 'Default set', 'number')}${f('default_order', 'Default order', 'number')}
       ${f('chart_url', 'Chart link (PDF / Drive)', 'url', 'w4')}
       <label class="f w4">Notes<input class="in" data-s="comment" value="${esc(s.comment || '')}" placeholder="e.g. tuning half step down"></label>
@@ -869,14 +1107,15 @@ async function pdfFor(g, kind) {
   render();
 }
 async function stagePdf(g) {
-  const { jsPDF } = window.jspdf; const items = setItems(g.id).filter(i => i.played);
+  const { jsPDF } = window.jspdf; const items = itemsOf(g.id).filter(i => i.played);   // g: slCtx()
   const doc = new jsPDF({ unit: 'pt', format: 'letter' }); const W = 612, M = 40;
   const sets = [...new Set(items.map(i => i.set_no))];
+  const plan = planOf(g); const ros = runOfShow(g, plan, Object.fromEntries(sets.map(n => [n, items.filter(i => i.set_no === n).reduce((a, i) => a + songDur(byId('songs', i.song_id), plan.buf), 0)])));
   sets.forEach((n, si) => {
     if (si) doc.addPage();
     doc.setFillColor(20, 14, 2); doc.rect(0, 0, W, 64, 'F');
-    doc.setTextColor(255, 191, 67); doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.text(`SET ${n}`, M, 42);
-    doc.setFontSize(10); doc.setTextColor(243, 238, 228); doc.setFont('helvetica', 'normal'); doc.text(`${g.title} · ${fmtDate(g.gig_date)}`, W - M, 40, { align: 'right' });
+    doc.setTextColor(255, 191, 67); doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.text(`SET ${n}`, M, 42); const rr = ros.find(r => r.kind === 'set' && r.n === n); if (rr && rr.from) { doc.setFontSize(11); doc.text(`${rr.from} - ${rr.to}`, M + 80, 41); }
+    doc.setFontSize(10); doc.setTextColor(243, 238, 228); doc.setFont('helvetica', 'normal'); doc.text(`${g.title}${g.gig_date ? ' · ' + fmtDate(g.gig_date) : ''}`, W - M, 40, { align: 'right' });
     const its = items.filter(i => i.set_no === n); const rowH = Math.min(36, (792 - 100) / Math.max(its.length, 1));
     let y = 64 + rowH;
     its.forEach((i, k) => {
@@ -888,7 +1127,7 @@ async function stagePdf(g) {
       y += rowH;
     });
   });
-  download(`Setlist - ${g.title} - ${g.gig_date || ''}.pdf`, doc.output('blob'));
+  download(`Setlist - ${g.title}${g.gig_date ? ' - ' + g.gig_date : ''}.pdf`, doc.output('blob'));
 }
 
 /* ============================================================ ICS */
@@ -950,6 +1189,13 @@ function after(sec, id) {
   const ss = $('#songSearch'); if (ss) ss.oninput = e => { UI.songSearch = e.target.value; keepUI(); rerenderKeepFocus('#songSearch'); };
   const ls = $('#libSearch'); if (ls) ls.oninput = e => { UI.libSearch = e.target.value; rerenderKeepFocus('#libSearch'); };
   const cf = $('#copyFrom'); if (cf) cf.onchange = e => e.target.value && copySetlist(id, e.target.value);
+  if (sec === 'setlist') {
+    const L = byId('setlists', id);
+    const saveMeta = async () => { const r = { ...byId('setlists', id), name: $('#slName').value.trim() || null, notes: $('#slNotes').value.trim() || null }; if (r.name !== L.name || r.notes !== L.notes) { await guard(() => save('setlists', r), 'Saved'); render(); } };
+    const nm = $('#slName'), nt = $('#slNotes'); if (nm) nm.onchange = saveMeta; if (nt) nt.onchange = saveMeta;
+    const as = $('#slAssign'); if (as) as.onchange = e => e.target.value && assignSetlist(id, e.target.value);
+  }
+  $$('[data-act-change="sl-attach"]').forEach(el => el.onchange = e => e.target.value && assignSetlist(e.target.value, el.dataset.gig));
   if (sec === 'gig') $$('[data-f],[data-c]').forEach(el => el.addEventListener('input', () => { S.dirty = true; const n = $('#dirtyNote'); if (n) n.textContent = 'Unsaved changes'; }));
 }
 function rerenderKeepFocus(sel) { const el = $(sel); const pos = el ? el.selectionStart : 0; render(); const n = $(sel); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch {} } }
@@ -966,7 +1212,9 @@ document.addEventListener('click', async e => {
   if (el.closest('[data-stop]') && el.dataset.act === 'modal-close' && el.classList.contains('scrim')) return;
   if (el.classList.contains('scrim') && e.target !== el) return;
   const act = el.dataset.act, v = el.dataset.v, id = el.dataset.id;
-  const route = (location.hash || '#home').slice(1).split('/'); const g = route[0] === 'gig' || route[0] === 'setlist' ? byId('gigs', route[1]) : null;
+  const route = (location.hash || '#home').slice(1).split('/');
+  const L = route[0] === 'setlist' ? byId('setlists', route[1]) : null;
+  const g = route[0] === 'gig' ? byId('gigs', route[1]) : L ? slCtx(L) : null;        // on a setlist page, g is the setlist with gig details filled in
   if (el.tagName === 'A' && el.getAttribute('href') === '#') e.preventDefault();
   if (act === 'rate' || el.closest('.stars')) e.stopPropagation();
   const H = ACTIONS[act]; if (H) await H({ el, v, id, g, e });
@@ -993,7 +1241,8 @@ const ACTIONS = {
   'save-gig': async ({ g }) => { if (!g) return; await saveGigForm(g); },
   'del-gig-ask': ({ el }) => { el.parentElement.innerHTML = `<span class="confirm">Delete this ${byId('gigs', (location.hash.split('/')[1]))?.kind === 'practice' ? 'practice' : 'gig'} and its setlist? <button class="btn danger sm" data-act="del-gig">Yes, delete</button><button class="btn sm" data-act="cancel-del">Keep</button></span>`; },
   'cancel-del': () => render(),
-  'del-gig': async ({ g }) => { if (!g) return; await guard(() => del('gigs', g.id), 'Deleted'); S.setlist_items = S.setlist_items.filter(i => i.gig_id !== g.id); S.dirty = false; location.hash = '#gigs'; },
+  'fold-all': ({ v }) => { $$('details[data-fold]').forEach(d => d.open = v === '1'); },
+  'del-gig': async ({ g }) => { if (!g) return; await guard(() => del('gigs', g.id), 'Deleted'); S.setlists.forEach(l => { if (l.gig_id === g.id) l.gig_id = null; }); S.dirty = false; location.hash = '#gigs'; },
   pdf: async ({ v, g }) => { if (!g) return; if (S.dirty) await saveGigForm(g, true); await pdfFor(byId('gigs', g.id), v); },
   mail: async ({ v, g }) => { if (!g) return; if (S.dirty) await saveGigForm(g, true); openModal(mailModal(byId('gigs', g.id), v)); },
   'copy-mail': () => copy($('#mailBody').textContent),
@@ -1003,34 +1252,79 @@ const ACTIONS = {
   'rotate-token': async () => { const st = settings(); await guard(() => save('settings', { ...st, ics_token: uuid() }), 'New link made — re-subscribe on each phone'); render(); },
   // setlists
   'sel-set': ({ v, e }) => { if (e.target.closest('button')) return; UI.selSet = Number(v); render(); },
-  'lib-add': async ({ id, g }) => { if (!g) return; const its = setItems(g.id).filter(i => i.set_no === UI.selSet); await guard(() => save('setlist_items', { id: uuid(), gig_id: g.id, set_no: UI.selSet, position: (its.length ? Math.max(...its.map(i => i.position)) : 0) + 1, song_id: id, played: true })); render(); },
+  'lib-add': async ({ id, g }) => { if (!g) return; const its = itemsOf(g.id).filter(i => i.set_no === UI.selSet); await guard(() => save('setlist_items', { id: uuid(), setlist_id: g.id, set_no: UI.selSet, position: (its.length ? Math.max(...its.map(i => i.position)) : 0) + 1, song_id: id, played: true, pinned: false })); render(); },
   'si-del': async ({ id }) => { await guard(() => del('setlist_items', id)); render(); },
   'si-played': async ({ id }) => { const i = byId('setlist_items', id); await guard(() => save('setlist_items', { ...i, played: !i.played })); render(); },
   'si-move': async ({ id, v }) => {
-    const i = byId('setlist_items', id); const its = setItems(i.gig_id).filter(x => x.set_no === i.set_no); const k = its.findIndex(x => x.id === id); const j = k + Number(v);
+    const i = byId('setlist_items', id); const its = itemsOf(i.setlist_id).filter(x => x.set_no === i.set_no); const k = its.findIndex(x => x.id === id); const j = k + Number(v);
     if (j < 0 || j >= its.length) return; [its[k], its[j]] = [its[j], its[k]];
     await guard(() => saveMany('setlist_items', its.map((x, n) => ({ ...x, position: n + 1 })))); render();
   },
-  'si-set': async ({ id }) => { const i = byId('setlist_items', id); const g = byId('gigs', i.gig_id); const n = Math.max(n0(g.set_count), ...setItems(g.id).map(x => x.set_no), 1); const to = i.set_no % n + 1; const its = setItems(g.id).filter(x => x.set_no === to); await guard(() => save('setlist_items', { ...i, set_no: to, position: (its.length ? Math.max(...its.map(x => x.position)) : 0) + 1 })); render(); },
-  'set-add': async ({ g }) => { const n = Math.max(n0(g.set_count), ...setItems(g.id).map(x => x.set_no), 1) + 1; await guard(() => save('gigs', { ...g, set_count: n })); UI.selSet = n; render(); },
-  'set-drop': async ({ g }) => { const n = Math.max(n0(g.set_count), ...setItems(g.id).map(x => x.set_no), 1); const its = setItems(g.id).filter(x => x.set_no === n); if (its.length) { toast(`Set ${n} still has songs — remove or move them first.`, true); return; } await guard(() => save('gigs', { ...g, set_count: n - 1 })); render(); },
-  'set-clear-ask': ({ el }) => { el.parentElement.innerHTML = `<span class="confirm">Remove every song? <button class="btn danger sm" data-act="set-clear">Clear</button><button class="btn sm" data-act="cancel-del">Keep</button></span>`; },
-  'set-clear': async ({ g }) => { await guard(() => api.remove('setlist_items', { gig_id: g.id })); S.setlist_items = S.setlist_items.filter(i => i.gig_id !== g.id); render(); },
-  'set-default': async ({ g }) => {
-    if (setItems(g.id).length) { toast('Clear the setlist first, or add songs one at a time.', true); return; }
-    const rows = S.songs.filter(s => s.status === 'active' && s.default_set).sort((a, b) => a.default_set - b.default_set || (a.default_order || 0) - (b.default_order || 0));
-    const pos = {}; const ins = rows.map(s => { pos[s.default_set] = (pos[s.default_set] || 0) + 1; return { id: uuid(), gig_id: g.id, set_no: s.default_set, position: pos[s.default_set], song_id: s.id, played: true }; });
-    await guard(() => saveMany('setlist_items', ins), `${ins.length} songs added`); await guard(() => save('gigs', { ...g, set_count: Math.max(...ins.map(i => i.set_no), 1) })); render();
+  'si-set': async ({ id }) => { const i = byId('setlist_items', id); const P = slCtx(byId('setlists', i.setlist_id)); const n = planOf(P).sets; const to = i.set_no % n + 1; const its = itemsOf(P.id).filter(x => x.set_no === to); await guard(() => save('setlist_items', { ...i, set_no: to, position: (its.length ? Math.max(...its.map(x => x.position)) : 0) + 1 })); render(); },
+  'si-pin': async ({ id }) => { const i = byId('setlist_items', id); await guard(() => save('setlist_items', { ...i, pinned: !i.pinned })); render(); },
+  'plan-save': async ({ g }) => {
+    const L = byId('setlists', g.id), gig = gigOf(L), r = { ...L };
+    $$('[data-plan]').forEach(i => { const k = i.dataset.plan; r[k] = k === 'start_time' ? (i.value.trim() || null) : (i.value === '' ? null : Number(i.value)); });
+    if (gig && r.start_time === gig.start_time) r.start_time = null;                 // keep following the gig unless changed here
+    if (gig && r.hours != null && Number(r.hours) === n0(gig.hours)) r.hours = null;
+    r.set_count = Math.max(1, Math.round(n0(r.set_count) || 1));
+    const hi = Math.max(0, ...itemsOf(L.id).map(i => i.set_no));
+    if (hi > r.set_count) return toast(`Set ${hi} still has songs — move or clear them before dropping to ${r.set_count} set${r.set_count > 1 ? 's' : ''}.`, true);
+    const was = planOf(slCtx(L));
+    if (r.break_count == null || (r.set_count !== was.sets && Number(r.break_count) === was.breaks && was.breaks === was.sets - 1)) r.break_count = r.set_count - 1;   // keep "a break between each set" when the set count changes
+    r.break_count = Math.min(Math.max(0, Math.round(r.break_count)), r.set_count - 1);
+    await guard(() => save('setlists', r), 'Plan updated'); render();
   },
-  'set-pdf': ({ g }) => { if (!setItems(g.id).length) return toast('Add songs first.', true); stagePdf(g); },
-  'set-text': ({ g }) => { const its = setItems(g.id).filter(i => i.played); const txt = [...new Set(its.map(i => i.set_no))].map(n => `SET ${n}\n` + its.filter(i => i.set_no === n).map((i, k) => { const s = byId('songs', i.song_id) || {}; return `${k + 1}. ${s.title} (${songLabel(s)})`; }).join('\n')).join('\n\n'); copy(`${g.title} — ${fmtDate(g.gig_date)}\n\n${txt}`); },
+  'opt-open': ({ g }) => { S._opt = { lid: g.id, prefs: optPrefs(g), res: null }; openModal(optModal(g, S._opt.prefs, null)); },
+  'opt-w': ({ el, v }) => { S._opt.prefs.w[el.dataset.k] = Number(v); readOpt(); refreshOpt(); },
+  'opt-shape': ({ v }) => { S._opt.prefs.shape = v; readOpt(); refreshOpt(); },
+  'opt-run': () => {
+    readOpt(); const g = slCtx(byId('setlists', S._opt.lid)); const pr = S._opt.prefs;
+    if (!Object.values(pr.pools).some(Boolean)) return toast('Pick at least one song pool.', true);
+    if (!g.hours) toast('No slot length set — using the default set length.');
+    S._opt.res = optimizeSetlist(g, pr, Date.now()); refreshOpt();
+  },
+  'opt-apply': async () => {
+    const L = byId('setlists', S._opt.lid), res = S._opt.res; if (!res) return;
+    const items = itemsOf(L.id), keepPinned = S._opt.prefs.keepPinned;
+    const pinnedBySong = new Map(items.filter(i => keepPinned && i.pinned).map(i => [i.song_id, i]));
+    const drop = items.filter(i => !(keepPinned && i.pinned)).map(i => i.id);
+    const rows = []; res.result.forEach((l, k) => l.forEach((s, n) => { const p = pinnedBySong.get(s.id); rows.push(p ? { ...p, set_no: k + 1, position: n + 1 } : { id: uuid(), setlist_id: L.id, set_no: k + 1, position: n + 1, song_id: s.id, played: true, pinned: false }); }));
+    const ok = await guard(async () => {
+      if (drop.length) { await api.remove('setlist_items', { id: drop }); S.setlist_items = S.setlist_items.filter(i => !drop.includes(i.id)); }
+      await saveMany('setlist_items', rows);
+      await save('setlists', { ...byId('setlists', L.id), set_count: res.plan.sets, plan: { ...(L.plan || {}), opt: S._opt.prefs } });
+      return true;
+    }, `Setlist built — ${rows.length} songs`);
+    if (ok) { closeModal(); render(); }
+  },
+  'set-clear-ask': ({ el }) => { el.parentElement.innerHTML = `<span class="confirm">Remove every song? <button class="btn danger sm" data-act="set-clear">Clear</button><button class="btn sm" data-act="cancel-del">Keep</button></span>`; },
+  'set-clear': async ({ g }) => { await guard(() => api.remove('setlist_items', { setlist_id: g.id })); S.setlist_items = S.setlist_items.filter(i => i.setlist_id !== g.id); render(); },
+  'set-default': async ({ g }) => {
+    if (itemsOf(g.id).length) { toast('Clear the setlist first, or add songs one at a time.', true); return; }
+    const rows = S.songs.filter(s => s.status === 'active' && s.default_set).sort((a, b) => a.default_set - b.default_set || (a.default_order || 0) - (b.default_order || 0));
+    const pos = {}; const ins = rows.map(s => { pos[s.default_set] = (pos[s.default_set] || 0) + 1; return { id: uuid(), setlist_id: g.id, set_no: s.default_set, position: pos[s.default_set], song_id: s.id, played: true, pinned: false }; });
+    await guard(() => saveMany('setlist_items', ins), `${ins.length} songs added`); const L = byId('setlists', g.id); await guard(() => save('setlists', { ...L, set_count: Math.max(n0(L.set_count), ...ins.map(i => i.set_no), 1) })); render();
+  },
+  'set-pdf': ({ g }) => { if (!itemsOf(g.id).length) return toast('Add songs first.', true); stagePdf(g); },
+  'set-text': ({ g }) => { const its = itemsOf(g.id).filter(i => i.played); const txt = [...new Set(its.map(i => i.set_no))].map(n => `SET ${n}\n` + its.filter(i => i.set_no === n).map((i, k) => { const s = byId('songs', i.song_id) || {}; return `${k + 1}. ${s.title} (${songLabel(s)})`; }).join('\n')).join('\n\n'); copy(`${g.title}${g.gig_date ? ' — ' + fmtDate(g.gig_date) : ''}\n\n${txt}`); },
+  // setlist records
+  'sl-new': async ({ el }) => { const gid = el.dataset.gig || null; const r = await guard(() => save('setlists', { id: uuid(), gig_id: gid, name: null })); if (r) location.hash = '#setlist/' + r.id; },
+  'sl-unassign': async ({ g }) => { const L = byId('setlists', g.id); await guard(() => save('setlists', { ...L, name: L.name || slName(L), gig_id: null }), 'Unassigned — kept as a draft'); render(); },
+  'sl-dup': async ({ g }) => {
+    const L = byId('setlists', g.id); const copyId = uuid();
+    const r = await guard(async () => { const c = await save('setlists', { ...L, id: copyId, gig_id: null, name: `${slName(L)} (copy)`, created_at: undefined, updated_at: undefined }); await saveMany('setlist_items', itemsOf(L.id).map(i => ({ ...i, id: uuid(), setlist_id: copyId, created_at: undefined, updated_at: undefined }))); return c; }, 'Copied as a draft');
+    if (r) location.hash = '#setlist/' + copyId;
+  },
+  'sl-del-ask': ({ el }) => { el.parentElement.innerHTML = `<span class="confirm">Delete this setlist and its songs? <button class="btn danger sm" data-act="sl-del">Delete</button><button class="btn sm" data-act="cancel-del">Keep</button></span>`; },
+  'sl-del': async ({ g }) => { const id = g.id; if (await guard(() => del('setlists', id), 'Setlist deleted')) {} S.setlist_items = S.setlist_items.filter(i => i.setlist_id !== id); location.hash = '#setlists'; },
   // songs
   rate: async ({ id, v }) => { if (!S.me) return; const cur = myRating(id); const val = Number(v); if (cur === val) { await guard(() => api.remove('song_ratings', { song_id: id, member_id: S.me.id })); S.song_ratings = S.song_ratings.filter(r => !(r.song_id === id && r.member_id === S.me.id)); } else await guard(() => save('song_ratings', { song_id: id, member_id: S.me.id, rating: val })); render(); },
   'song-edit': ({ id, e }) => { if (e.target.closest('.stars')) return; openModal(songModal(byId('songs', id))); },
   'song-new': () => openModal(songModal({ status: 'learning', added_on: todayIso() })),
   'song-save': async ({ id }) => {
     const s = id ? { ...byId('songs', id) } : { id: uuid() };
-    $$('[data-s]').forEach(i => { const k = i.dataset.s; if (k === 'length_fmt') { const m = i.value.trim().match(/^(\d+)(?::(\d{1,2}))?$/); s.length_min = m ? +m[1] + (+(m[2] || 0)) / 60 : null; } else s[k] = i.type === 'number' ? (i.value === '' ? null : Number(i.value)) : (i.value.trim() || null); });
+    $$('[data-s]').forEach(i => { const k = i.dataset.s; if (k === 'length_fmt') { const m = i.value.trim().match(/^(\d+)(?::(\d{1,2}))?$/); s.length_min = m ? +m[1] + (+(m[2] || 0)) / 60 : null; } else if (k === 'energy') s[k] = i.value ? Number(i.value) : null; else s[k] = i.type === 'number' ? (i.value === '' ? null : Number(i.value)) : (i.value.trim() || null); });
     const parts = {}; $$('[data-part]').forEach(i => { if (i.value.trim()) parts[i.dataset.part] = i.value.trim(); }); s.parts = Object.keys(parts).length ? parts : null;
     if (!s.title) return toast('Give the song a title.', true);
     if (await guard(() => save('songs', s), 'Song saved')) { closeModal(); render(); }
@@ -1057,6 +1351,8 @@ const ACTIONS = {
   'save-payees': async () => { const rows = S.payees.map(p => ({ ...p })); $$('[data-p]').forEach(i => { const r = rows.find(x => x.id === i.dataset.p); r[i.dataset.k] = i.value.trim() || null; }); await guard(() => saveMany('payees', rows), 'Pay-to saved'); render(); },
   'payee-new': async () => { await guard(() => save('payees', { id: uuid(), name: 'New pay-to', is_default: false })); render(); },
 };
+function readOpt() { $$('#modalRoot [data-opt]').forEach(i => { const [a, b] = i.dataset.opt.split('.'); if (b) S._opt.prefs[a][b] = i.checked; else S._opt.prefs[a] = i.checked; }); }
+function refreshOpt() { const m = $('#modalRoot .modal'); const sc = m ? m.parentElement.scrollTop : 0; openModal(optModal(slCtx(byId('setlists', S._opt.lid)), S._opt.prefs, S._opt.res)); const n = $('#modalRoot .scrim'); if (n) n.scrollTop = sc; }
 function readX(x) { $$('#modalRoot [data-x]').forEach(i => { const k = i.dataset.x; x[k] = i.type === 'checkbox' ? i.checked : i.type === 'number' ? (i.value === '' ? null : Number(i.value)) : (i.value.trim() || null); }); }
 function collectGig(g) {
   const r = { ...g };
@@ -1080,12 +1376,18 @@ async function saveGigForm(g, quiet) {
   }
   if (await guard(() => save('gigs', r), quiet ? null : 'Saved')) { S.dirty = false; if (!quiet) render(); }
 }
-async function copySetlist(toId, fromId) {
-  if (setItems(toId).length) { toast('Clear this setlist before copying another one in.', true); render(); return; }
-  const src = setItems(fromId);
-  const rows = src.map(i => ({ id: uuid(), gig_id: toId, set_no: i.set_no, position: i.position, song_id: i.song_id, played: true }));
+async function copySetlist(toId, fromId) {                // setlist ids
+  if (itemsOf(toId).length) { toast('Clear this setlist before copying another one in.', true); render(); return; }
+  const rows = itemsOf(fromId).map(i => ({ id: uuid(), setlist_id: toId, set_no: i.set_no, position: i.position, song_id: i.song_id, played: true, pinned: !!i.pinned }));
   await guard(() => saveMany('setlist_items', rows), `Copied ${rows.length} songs`);
-  const g = byId('gigs', toId); const n = Math.max(...rows.map(x => x.set_no), 1); if (n0(g.set_count) < n) await guard(() => save('gigs', { ...g, set_count: n }));
+  const L = byId('setlists', toId), F = byId('setlists', fromId), n = Math.max(...rows.map(x => x.set_no), 1);
+  await guard(() => save('setlists', { ...L, set_count: Math.max(n0(L.set_count), n), break_count: L.break_count ?? F.break_count, break_min: L.break_min ?? F.break_min, plan: L.plan || F.plan }));
+  render();
+}
+async function assignSetlist(lid, gid) {
+  const L = byId('setlists', lid), g = byId('gigs', gid);
+  if (listOf(gid)) { toast(`${g.title} already has a setlist — unassign it first.`, true); render(); return; }
+  await guard(() => save('setlists', { ...L, gig_id: gid, name: L.name && L.name !== g.title ? L.name : null }), `Assigned to ${g.title}`);
   render();
 }
 // sale amount auto-fill
