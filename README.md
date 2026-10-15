@@ -7,6 +7,7 @@ Static site on GitHub Pages (same pattern as TurfOps) + a `band` schema in the *
 index.html, app.js, CNAME, assets/, vendor/   ← the website (push these to the Pages repo)
 supabase/01_schema.sql                        ← tables, RLS, helper functions
 supabase/02_seed.sql                          ← your data from Trailer Folk Master Sheet.xlsx  (do NOT commit to a public repo)
+supabase/03_setlist_planner.sql               ← genre/energy/tuning on songs, breaks on gigs, pinned setlist songs
 supabase/functions/band-calendar/index.ts     ← live calendar feed
 ```
 
@@ -16,6 +17,7 @@ supabase/functions/band-calendar/index.ts     ← live calendar feed
 2. **Expose it** — Project Settings → Data API → *Exposed schemas* → add `band` → Save.
 3. **Seed** — open `supabase/02_seed.sql`, put your login email on the `update band.members … where name = 'Tyler'` line near the bottom (and bandmates' if you have them), then Run it.
    Loads 94 gigs/practices/passes, 111 songs, 530 setlist rows, 4 clients, 2 pay-tos.
+   Then run `supabase/03_setlist_planner.sql` (adds the setlist-planner fields and a starting genre + energy for every song).
 4. **Logins** — Authentication → Users → *Add user* for each member using the same email (or let them use "Email me a sign-in link" once their email is on the roster).
    Add `https://band.eckerthaus.com` to Authentication → URL Configuration → Redirect URLs so magic links come back to the app.
    A login only sees band data if its email is on the roster — TurfOps users without a roster row see nothing.
@@ -35,3 +37,8 @@ supabase/functions/band-calendar/index.ts     ← live calendar feed
 - Invoice numbers follow your existing pattern: `CLIENTCODE_YYYYMM` (e.g. `OUHSC_202604`). Set the client's invoice code on the gig page.
 - Line-item text `{hours}` fills from the gig's hours, e.g. "Load-in, setup, soundcheck, music (2hrs), load-out".
 - Things the seed couldn't know: client emails/phones, deposit dates, and real merch items — add them as you go.
+
+## Setlist planner
+On any setlist: enter start time, slot length (hours, breaks included), number of sets, number of breaks and break length → the app sizes each set and shows clock times.
+**Optimize setlist** picks songs from the pools you tick and orders them to: follow an energy shape, keep instrument swaps and retunes to a minimum (half-step songs get grouped at a set start), avoid same-key and same-singer runs, spread genres, favor the band's top-rated songs, and rest songs from the last gig. Pin (⚑) any song to keep it where it is (first dance, closer). Nothing changes until you press *Use this setlist*.
+Genre and energy (1–5) were pre-filled from the song's original style — adjust them on the Songs page so they match how *you* play it.
