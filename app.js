@@ -434,7 +434,7 @@ function setlistSets(L, compact) {
     return `<section class="panel set"><div class="row"><h3>Set ${n}</h3>${slot && slot.from ? `<span class="small muted">${slot.from}–${slot.to}</span>` : ''}<span class="spacer"></span><span class="small muted num">${hm(dur[n])}</span></div>
       ${its.map((i, k) => { const s = byId('songs', i.song_id) || { title: '(deleted song)' }; const c = changes(prev, s); prev = s;
         const warn = compact ? '' : [c.tuning ? `<span style="color:var(--bad)">${cbm(false)}retune → ${esc(s.tuning || 'Standard')}</span>` : '', ...c.inst.map(x => `<span style="color:var(--gold)">${esc(x.who)}: ${esc(x.to)}</span>`)].filter(Boolean).join(' · ');
-        return `<div class="song"><span class="n">${k + 1}</span><div style="min-width:0"><div class="nm">${esc(s.title)}</div>
+        return `<div class="song"><span class="n">${k + 1}</span><div style="min-width:0"><div class="nm">${esc(s.title)}${s.is_encore ? ' <span class="small" style="color:var(--gold)">encore</span>' : ''}</div>
           <div class="meta">${esc(songLabel(s))}${compact ? '' : ' · ' + mins(s.length_min) + (s.lead_vox ? ' · ' + esc(s.lead_vox) : '')}</div>${warn ? `<div class="meta">⇄ ${warn}</div>` : ''}</div><span></span></div>${i.note ? `<div class="snote">${esc(i.note)}</div>` : ''}`; }).join('')}
       ${brk && brk.kind === 'break' && n < plan.sets ? `<div class="small muted" style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">Break · ${brk.dur} min${brk.from ? ` · ${brk.from}–${brk.to}` : ''}</div>` : ''}
     </section>`; }).join('')}</div>`;
@@ -655,8 +655,8 @@ function setlistsView() {
    </div>`;
 }
 /* ----- show plan: sets, breaks, clock times ----- */
-function planOf(g) {                                    // g: a slCtx() setlist
-  const st = settings(), items = itemsOf(g.id);
+function planOf(g, ignoreItems) {                      // g: a slCtx() setlist
+  const st = settings(), items = ignoreItems ? [] : itemsOf(g.id);
   const sets = Math.max(n0(g.set_count), ...items.map(i => i.set_no), 1);
   const breaks = g.break_count != null ? Math.min(n0(g.break_count), Math.max(sets - 1, 0)) : Math.max(sets - 1, 0);
   const breakMin = g.break_min != null ? n0(g.break_min) : n0(st.default_break_min ?? 15);
@@ -755,7 +755,7 @@ function setlistEdit(id) {
         return `
         <div class="song ${i.played ? '' : 'unplayed'}">
           <span class="n">${k + 1}</span>
-          <div style="min-width:0"><div class="nm">${i.pinned ? '<span title="Pinned — the optimizer keeps it here" style="color:var(--gold)">⚑ </span>' : ''}${esc(s.title)}</div>
+          <div style="min-width:0"><div class="nm">${i.pinned ? '<span title="Pinned — the optimizer keeps it here" style="color:var(--gold)">⚑ </span>' : ''}${esc(s.title)}${s.is_encore ? ' <span class="small" style="color:var(--gold)">encore</span>' : ''}</div>
             <div class="meta">${esc(songLabel(s))} · ${mins(s.length_min)} · ${esc(s.lead_vox || '')}${s.genre ? ' · ' + esc(s.genre) : ''}${s.energy ? ' · ' + '▮'.repeat(s.energy) : ''}</div>
             ${warn ? `<div class="meta">⇄ ${warn}</div>` : ''}</div>
           <div class="acts">
@@ -825,7 +825,7 @@ function setlistEdit(id) {
       <div class="row" style="margin:10px 0"><input class="in" id="libSearch" placeholder="Search songs or genre" value="${esc(UI.libSearch)}">
         <div class="chips">${[['active','Active'],['bench','Bench'],['holiday','Holiday'],['all','All']].map(([k, l]) => `<button class="chip ${UI.libFilter === k ? 'on' : ''}" data-act="lib-filter" data-v="${k}">${l}</button>`).join('')}</div></div>
       <div class="lib">${lib.map(s => `<div class="libi ${inSet[s.id] ? 'used' : ''}" data-act="lib-add" data-id="${s.id}">
-         <div class="grow"><div style="font-weight:600">${esc(s.title)}</div><div class="small muted">${esc(s.artist || '')} · ${esc(songLabel(s))} · ${mins(s.length_min)}${s.genre ? ' · ' + esc(s.genre) : ''}${inSet[s.id] ? ' · in Set ' + inSet[s.id] : ''}</div></div>
+         <div class="grow"><div style="font-weight:600">${esc(s.title)}${s.is_opener ? ' <span class="small" style="color:var(--gold)">opener</span>' : ''}${s.is_closer ? ' <span class="small" style="color:var(--gold)">closer</span>' : ''}${s.is_encore ? ' <span class="small" style="color:var(--gold)">encore</span>' : ''}</div><div class="small muted">${esc(s.artist || '')} · ${esc(songLabel(s))} · ${mins(s.length_min)}${s.genre ? ' · ' + esc(s.genre) : ''}${inSet[s.id] ? ' · in Set ' + inSet[s.id] : ''}</div></div>
          <div style="text-align:right"><div class="stars ro">${starsRO(avgRating(s.id))}</div><div class="small faint">${(stats[s.id] || {}).plays || 0} plays</div></div></div>`).join('')}</div>
     </section>
   </div>`;
@@ -833,12 +833,12 @@ function setlistEdit(id) {
 
 /* ============================================================ optimizer */
 const OPT_DEFAULT = { pools: { active: true, bench: false, learning: false, holiday: false }, shape: 'build', keepPinned: true,
-  w: { energy: 2, inst: 2, tuning: 3, key: 1, vox: 1, genre: 1, rating: 2, fresh: 1 } };
+  encore: 1, w: { energy: 2, inst: 2, tuning: 3, key: 1, vox: 1, genre: 1, rating: 2, fresh: 1, oc: 2 } };
 const SHAPES = { build: 'Start easy, finish big', party: 'High energy all night', dinner: 'Dinner first, then dance', waves: 'Each set builds' };
-const WLAB = { energy: 'Energy arc', inst: 'Fewer instrument swaps', tuning: 'Group tunings (retune only at breaks)', key: 'Vary keys back-to-back', vox: 'Mix lead singers', genre: 'Spread genres', rating: 'Favor top-rated songs', fresh: 'Rest songs from the last gig' };
+const WLAB = { energy: 'Energy arc', inst: 'Fewer instrument swaps', tuning: 'Group tunings (retune only at breaks)', key: 'Vary keys back-to-back', vox: 'Mix lead singers', genre: 'Spread genres', rating: 'Favor top-rated songs', fresh: 'Rest songs from the last gig', oc: 'Open and close sets with flagged songs' };
 function optPrefs(g) {
   const p = JSON.parse(JSON.stringify(OPT_DEFAULT)); const saved = (g.plan && g.plan.opt) || {};   // g: slCtx()
-  Object.assign(p.pools, saved.pools || {}); Object.assign(p.w, saved.w || {}); if (saved.shape) p.shape = saved.shape; if (saved.keepPinned != null) p.keepPinned = saved.keepPinned;
+  Object.assign(p.pools, saved.pools || {}); Object.assign(p.w, saved.w || {}); if (saved.shape) p.shape = saved.shape; if (saved.keepPinned != null) p.keepPinned = saved.keepPinned; if (saved.encore != null) p.encore = saved.encore;
   if (!saved.pools && g.gig_date && /-12-/.test(g.gig_date)) p.pools.holiday = true;
   return p;
 }
@@ -855,18 +855,21 @@ function energyTarget(shape, k, sets, p) {           // k: 0-based set, p: 0..1 
 }
 function optimizeSetlist(g, prefs, seed) {
   let rnd = (seed || Date.now()) % 2147483647; const rand = () => (rnd = rnd * 48271 % 2147483647) / 2147483647;
-  const plan = planOf(g), buf = plan.buf, W = prefs.w;
+  const plan = planOf(g, true), buf = plan.buf, W = prefs.w;       // g carries the plan values from the optimizer window
   const items = itemsOf(g.id);
   const pinned = prefs.keepPinned ? items.filter(i => i.pinned) : [];
   const pinnedIds = new Set(pinned.map(i => i.song_id));
   const lastGig = S.gigs.filter(x => isGig(x) && x.status === 'complete' && x.id !== g.gig_id && setItems(x.id).length && x.gig_date <= (g.gig_date || todayIso())).sort((a, b) => b.gig_date.localeCompare(a.gig_date))[0];
   const lastSet = new Set(lastGig ? setItems(lastGig.id).map(i => i.song_id) : []);
-  const pool = S.songs.filter(s => prefs.pools[s.status] && !pinnedIds.has(s.id) && n0(s.length_min) > 0);
-  const score = s => { const r = avgRating(s.id); return W.rating * ((r == null ? 3 : r) - 3) * 1.4 - (lastSet.has(s.id) ? W.fresh * 0.8 : 0) + ({ active: 3, holiday: 2, learning: 0.5 }[s.status] || 0); };   // active rotation first; bench fills gaps
+  const inPool = S.songs.filter(s => prefs.pools[s.status] && !pinnedIds.has(s.id) && n0(s.length_min) > 0);
+  const pool = inPool.filter(s => !s.is_encore);                                  // encore songs are held back for after the last set
+  const score = s => { const r = avgRating(s.id); return W.rating * ((r == null ? 3 : r) - 3) * 1.4 - (lastSet.has(s.id) ? W.fresh * 0.8 : 0) + ({ active: 3, holiday: 2, learning: 0.5 }[s.status] || 0) + ((s.is_opener || s.is_closer) ? (W.oc || 0) * 1.5 : 0); };   // active rotation first; bench fills gaps
   const sc = new Map(pool.map(s => [s.id, score(s)]));
+  const encore = inPool.filter(s => s.is_encore).sort((a, b) => (score(b) + rand() * .8) - (score(a) + rand() * .8)).slice(0, Math.max(0, Math.round(n0(prefs.encore))));
+  const encDur = encore.reduce((a, s) => a + songDur(s, buf), 0);
   // --- pick songs to fill the music time
   const pinDur = pinned.reduce((a, i) => a + songDur(byId('songs', i.song_id), buf), 0);
-  const need = plan.music - pinDur;
+  const need = plan.music - pinDur - encDur;
   const ranked = pool.slice().sort((a, b) => (sc.get(b.id) + rand() * .8) - (sc.get(a.id) + rand() * .8));
   const chosen = []; let tot = 0;
   for (const s of ranked) { const d = songDur(s, buf); if (tot + d <= need + 1.5) { chosen.push(s); tot += d; } if (tot >= need - 1) break; }
@@ -877,20 +880,34 @@ function optimizeSetlist(g, prefs, seed) {
   sets.forEach(l => l.sort(() => rand() - .5));
   const pins = Array.from({ length: N }, () => []);
   pinned.forEach(i => { const k = Math.min(i.set_no, N) - 1; pins[k].push({ idx: items.filter(x => x.set_no === i.set_no).indexOf(i), song: byId('songs', i.song_id) }); });
-  const full = k => { const l = sets[k].slice(); pins[k].slice().sort((a, b) => a.idx - b.idx).forEach(p => l.splice(Math.min(p.idx, l.length), 0, p.song)); return l; };
+  const full = k => { const l = sets[k].slice(); pins[k].slice().sort((a, b) => a.idx - b.idx).forEach(p => l.splice(Math.min(p.idx, l.length), 0, p.song)); if (k === N - 1) l.push(...encore); return l; };
+  const brk = k => (k < N - 1 && k < plan.breaks) ? plan.breakMin : 0;           // minutes of break after set k (0-based); 0 = none
+  const gap = m => Math.min(1, Math.max(0, 1 - m / 10));                         // share of a swap/retune penalty that still applies across that gap
+  const OC = W.oc || 0;
+  const flowCost = (x, f = 1) => f * (W.inst * 1.6 * x.inst.length + (x.tuning ? W.tuning * 7 : 0) + (x.sameKey ? W.key * 1.4 : 0) + (x.capo ? W.key * 0.25 : 0) + (x.sameVox ? W.vox * 0.8 : 0) + (x.sameGenre ? W.genre * 0.7 : 0));
   const cost = () => {
-    let c = 0;
+    let c = 0; const all = [];
     for (let k = 0; k < N; k++) {
-      const l = full(k); const dur = l.reduce((a, s) => a + songDur(s, buf), 0);
+      const l = full(k); all.push(l); const dur = l.reduce((a, s) => a + songDur(s, buf), 0);
       c += Math.pow(dur - plan.perSet, 2) * 0.35 + (dur > plan.perSet + 3 ? (dur - plan.perSet - 3) * 4 : 0);
+      const lastI = l.length - 1 - (k === N - 1 ? encore.length : 0);                  // the encore sits after the closer
       l.forEach((s, i) => {
-        if (W.energy && s.energy) c += W.energy * 0.55 * Math.pow(s.energy - energyTarget(prefs.shape, k, N, l.length > 1 ? i / (l.length - 1) : 0), 2);
+        const flaggedSlot = OC && ((i === 0 && s.is_opener) || (i === lastI && s.is_closer));   // a flagged opener/closer in its slot wins over the energy arc
+        if (W.energy && s.energy && !flaggedSlot) c += W.energy * 0.55 * Math.pow(s.energy - energyTarget(prefs.shape, k, N, l.length > 1 ? i / (l.length - 1) : 0), 2);
+        if (OC) {                                                               // openers start sets, closers end them (the show's first and last matter most)
+          const realStart = k === 0 || brk(k - 1) >= 5, realEnd = k === N - 1 || brk(k) >= 5;
+          if (i > lastI) return;
+          if (s.is_opener) c += i === 0 ? -OC * (k === 0 ? 8 : realStart ? 2.5 : 1) : OC * 1;
+          if (s.is_closer) c += i === lastI ? -OC * (k === N - 1 ? 8 : realEnd ? 2.5 : 1) : OC * 1;
+        }
         if (!i) return; const x = changes(l[i - 1], s);
-        c += W.inst * 1.6 * x.inst.length + (x.tuning ? W.tuning * 7 : 0) + (x.sameKey ? W.key * 1.4 : 0) + (x.capo ? W.key * 0.25 : 0) + (x.sameVox ? W.vox * 0.8 : 0) + (x.sameGenre ? W.genre * 0.7 : 0);
+        c += flowCost(x);
         if (i >= 2) { if (x.sameVox && l[i - 2].lead_vox === s.lead_vox) c += W.vox * 1.8; if (x.sameGenre && l[i - 2].genre === s.genre) c += W.genre * 1.6; }
       });
       c -= sets[k].reduce((a, s) => a + sc.get(s.id), 0);
     }
+    // across set breaks: a long break absorbs retunes and swaps; a short or missing one doesn't
+    for (let k = 0; k < N - 1; k++) { const a = all[k], b = all[k + 1], f = gap(brk(k)); if (a.length && b.length && f) c += flowCost(changes(a[a.length - 1], b[0]), f); }
     return c;
   };
   let cur = cost(), best = cur, bestSets = sets.map(l => l.slice());
@@ -915,10 +932,54 @@ function optimizeSetlist(g, prefs, seed) {
     if (nc <= cur || rand() < Math.exp((cur - nc) / T)) { cur = nc; if (nc < best) { best = nc; bestSets = sets.map(l => l.slice()); } } else undo();
   }
   bestSets.forEach((l, k) => sets[k] = l);
+  // polish: try each flagged opener/closer at the very start or end of every set (by moving it, or swapping with the song there)
+  if (OC) {
+    const locate = s => { for (let k = 0; k < N; k++) { const i = sets[k].indexOf(s); if (i >= 0) return [k, i]; } return null; };
+    for (let pass = 0; pass < 4; pass++) {
+      let improved = false;
+      for (const s of sets.flat().filter(x => x.is_opener || x.is_closer)) {
+        const at = locate(s); if (!at) continue; const [ka, a] = at; let bestC = cost(), best = null;
+        for (let kb = 0; kb < N; kb++) {
+          const lb = sets[kb], la = sets[ka];
+          for (const where of ['start', 'end']) {
+            la.splice(a, 1); const p = where === 'start' ? 0 : lb.length; lb.splice(p, 0, s);                // move
+            const c1 = cost(); if (c1 < bestC - 1e-9) { bestC = c1; best = { mv: [kb, p] }; }
+            lb.splice(p, 1); la.splice(a, 0, s);
+            const q = where === 'start' ? 0 : lb.length - 1; if (lb.length && !(kb === ka && q === a)) {          // swap
+              const o = lb[q]; if (kb === ka) { [la[a], la[q]] = [la[q], la[a]]; } else { la[a] = o; lb[q] = s; }
+              const c2 = cost(); if (c2 < bestC - 1e-9) { bestC = c2; best = { sw: [kb, q] }; }
+              if (kb === ka) { [la[a], la[q]] = [la[q], la[a]]; } else { la[a] = s; lb[q] = o; }
+            }
+          }
+        }
+        if (best && best.mv) { sets[ka].splice(a, 1); sets[best.mv[0]].splice(best.mv[1], 0, s); improved = true; }
+        else if (best && best.sw) { const [kb, q] = best.sw, o = sets[kb][q]; if (kb === ka) { [sets[ka][a], sets[ka][q]] = [sets[ka][q], sets[ka][a]]; } else { sets[ka][a] = o; sets[kb][q] = s; } improved = true; }
+      }
+      if (!improved) break;
+    }
+  }
+  // a flagged opener must start the show and a flagged closer must end it (unless a pinned song holds that spot)
+  if (OC) {
+    const force = (isFlag, k, where) => {
+      const l = sets[k]; if (!l.length || pins[k].length) return;
+      const pos = where === 'start' ? 0 : l.length - 1; if (isFlag(l[pos])) return;
+      let bestC = Infinity, pick = null;
+      for (let kb = 0; kb < N; kb++) sets[kb].forEach((s, i) => {
+        if (!isFlag(s)) return;
+        const o = l[pos]; l[pos] = s; sets[kb][i] = o; if (kb === k && i === pos) return;
+        const c = cost(); if (c < bestC) { bestC = c; pick = [kb, i]; }
+        sets[kb][i] = s; l[pos] = o;
+      });
+      if (pick) { const [kb, i] = pick, s = sets[kb][i], o = l[pos]; l[pos] = s; sets[kb][i] = o; }
+    };
+    force(s => s.is_opener, 0, 'start'); force(s => s.is_closer, N - 1, 'end');
+  }
   const result = Array.from({ length: N }, (_, k) => full(k));
   return { result, plan, flow: flowStats(result), durs: result.map(l => l.reduce((a, s) => a + songDur(s, buf), 0)), lastGig };
 }
 function optModal(g, prefs, res) {
+  const pl = planOf(g, true), pv = S._opt && S._opt.plan || {};
+  const pin = (k, l, v, extra = '') => `<label class="f">${l}<input class="in" data-optplan="${k}" type="${k === 'start_time' ? 'text' : 'number'}" ${k === 'start_time' ? '' : 'min="0" step="any"'} value="${esc(v ?? '')}" ${extra}></label>`;
   const chk = (path, label, on) => `<label class="check"><input type="checkbox" data-opt="${path}" ${on ? 'checked' : ''}> ${label}</label>`;
   const lvl = k => `<div class="row" style="justify-content:space-between;gap:8px"><span class="small">${WLAB[k]}</span><div class="chips">${[['0','Off'],['1','Low'],['2','Med'],['3','High']].map(([v, l]) => `<button class="chip ${String(prefs.w[k]) === v ? 'on' : ''}" data-act="opt-w" data-k="${k}" data-v="${v}">${l}</button>`).join('')}</div></div>`;
   const ros = res ? runOfShow(g, res.plan, Object.fromEntries(res.durs.map((d, i) => [i + 1, d]))) : [];
@@ -926,19 +987,24 @@ function optModal(g, prefs, res) {
     <div class="row"><h2 class="sec" style="margin:0">Optimize setlist</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div>
     <div class="grid g2" style="margin-top:14px;align-items:start">
       <div class="stack">
+        <div><div class="eyebrow" style="margin-bottom:6px">Show plan</div>
+          <div class="fgrid" style="grid-template-columns:repeat(5,minmax(0,1fr))">${pin('start_time', 'Start', pv.start_time, 'placeholder="7pm"')}${pin('hours', 'Slot (hrs)', pv.hours)}${pin('set_count', 'Sets', pv.set_count)}${pin('break_count', 'Breaks', pv.break_count)}${pin('break_min', 'Break (min)', pv.break_min)}</div>
+          <div class="small faint" style="margin-top:6px">${pl.slot != null ? `${hm(pl.music)} of music in a ${hm(pl.slot)} slot, ${pl.sets} set${pl.sets === 1 ? '' : 's'} of about ${hm(pl.perSet)}` : `No slot length — using ${hm(pl.perSet)} per set`}${pl.breaks ? `, ${pl.breaks} break${pl.breaks === 1 ? '' : 's'} of ${pl.breakMin} min` : ', no breaks'}. Retunes and instrument swaps are treated as free across a break of 10+ minutes.</div></div>
         <div><div class="eyebrow" style="margin-bottom:6px">Song pool</div><div class="row">${chk('pools.active', 'Active', prefs.pools.active)}${chk('pools.bench', 'Bench', prefs.pools.bench)}${chk('pools.learning', 'Learning', prefs.pools.learning)}${chk('pools.holiday', 'Holiday', prefs.pools.holiday)}</div></div>
         <div><div class="eyebrow" style="margin-bottom:6px">Energy shape</div><div class="chips">${Object.entries(SHAPES).map(([k, l]) => `<button class="chip ${prefs.shape === k ? 'on' : ''}" data-act="opt-shape" data-v="${k}">${l}</button>`).join('')}</div></div>
         <div class="stack" style="margin-top:4px">${Object.keys(WLAB).map(lvl).join('')}</div>
         ${chk('keepPinned', 'Keep pinned songs (⚑) where they are', prefs.keepPinned)}
+        <label class="check">Encore songs after the last set <input class="in" type="number" min="0" max="4" step="1" data-optnum="encore" value="${esc(prefs.encore ?? 1)}" style="width:64px;margin-left:8px"></label>
         <div class="row"><button class="btn gold" data-act="opt-run">${res ? 'Try another version' : 'Build it'}</button><span class="small faint">Uses each song’s genre, energy, key, tuning, singer, parts, length and the band’s ratings.</span></div>
       </div>
       <div>${res ? `
-        <div class="eyebrow" style="margin-bottom:6px">Proposed — ${res.result.reduce((a, l) => a + l.length, 0)} songs</div>
+        <div class="eyebrow" style="margin-bottom:6px">Proposed — ${res.result.reduce((a, l) => a + l.length, 0)} songs · ${res.plan.sets} set${res.plan.sets === 1 ? '' : 's'}${res.plan.breaks ? ' · ' + res.plan.breaks + ' break' + (res.plan.breaks === 1 ? '' : 's') + ' × ' + res.plan.breakMin + ' min' : ''}</div>
         ${flowChips(res.flow)}
         ${(() => { const short = res.plan.music - res.durs.reduce((a, b) => a + b, 0); return short > 3 ? `<p class="small" style="color:var(--gold);margin:8px 0 0">About ${hm(short)} short of the slot — the pool ran out of songs. Tick Bench (or Learning) to fill it, or plan on a longer break.</p>` : ''; })()}
         <div class="stack" style="margin-top:10px;max-height:52vh;overflow:auto">${res.result.map((l, k) => { const r = ros.find(x => x.kind === 'set' && x.n === k + 1); let prev = null; return `<div>
           <div class="row"><b style="color:var(--gold)">Set ${k + 1}</b><span class="small muted">${r && r.from ? r.from + '–' + r.to + ' · ' : ''}${hm(res.durs[k])} / ${hm(res.plan.perSet)}</span></div>
-          ${l.map((s, i) => { const c = changes(prev, s); prev = s; return `<div class="small" style="display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;padding:3px 0;border-top:1px solid var(--line-soft)"><span class="faint num">${i + 1}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title)} <span class="faint">${esc(s.song_key || '')}${s.capo ? '/' + s.capo : ''} · ${esc(s.lead_vox || '')}${c.inst.length ? ' · ⇄ ' + c.inst.map(x => esc(x.who)).join(', ') : ''}${c.tuning ? ' · retune' : ''}</span></span><span class="faint">${'▮'.repeat(s.energy || 0)}</span></div>`; }).join('')}</div>`; }).join('')}</div>
+          ${l.map((s, i) => { const c = changes(prev, s); prev = s; return `<div class="small" style="display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;padding:3px 0;border-top:1px solid var(--line-soft)"><span class="faint num">${i + 1}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title)} <span class="faint">${esc(s.song_key || '')}${s.capo ? '/' + s.capo : ''} · ${esc(s.lead_vox || '')}${c.inst.length ? ' · ⇄ ' + c.inst.map(x => esc(x.who)).join(', ') : ''}${c.tuning ? ' · retune' : ''}${i === 0 && s.is_opener ? ' · <b style="color:var(--gold)">opener</b>' : ''}${i === l.length - 1 && s.is_closer ? ' · <b style="color:var(--gold)">closer</b>' : ''}</span></span><span class="faint">${'▮'.repeat(s.energy || 0)}</span></div>`; }).join('')}
+          ${k < res.result.length - 1 ? (k < res.plan.breaks ? `<div class="small muted" style="border-top:1px dashed var(--line);padding-top:6px;margin-top:4px">Break · ${res.plan.breakMin} min${(() => { const nx = r ? ros[ros.indexOf(r) + 1] : null; return nx && nx.kind === 'break' && nx.from ? ` · ${nx.from}–${nx.to}` : ''; })()}</div>` : `<div class="small" style="color:var(--gold);padding-top:6px">No break — runs straight into Set ${k + 2}</div>`) : ''}</div>`; }).join('')}</div>
         ${res.lastGig && prefs.w.fresh ? `<p class="small faint">Resting songs from ${esc(res.lastGig.title)} where it helps.</p>` : ''}
         <div class="row" style="margin-top:12px"><button class="btn gold" data-act="opt-apply">Use this setlist</button><span class="small faint">Replaces the unpinned songs on this gig.</span></div>`
       : '<div class="empty">Pick what matters and hit <b>Build it</b>. Nothing changes until you choose “Use this setlist”.</div>'}</div>
@@ -965,7 +1031,7 @@ function songsView() {
   <section class="panel"><div class="tbl-wrap"><table class="tbl">
     <thead><tr>${th('title', 'Song')}${th('key', 'Key')}${th('length', 'Len', 'r')}${th('lead', 'Lead vox', 'hide-sm')}${th('genre', 'Genre', 'hide-sm')}${th('mine', 'Your rating')}${th('avg', 'Band', 'hide-sm')}${th('plays', 'Plays', 'r')}${th('last', 'Last played', 'hide-sm')}</tr></thead>
     <tbody>${rows.map(s => { const r = ratingsFor(s.id); return `<tr class="click" data-act="song-edit" data-id="${s.id}">
-      <td><b>${esc(s.title)}</b><div class="small muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></td>
+      <td><b>${esc(s.title)}</b>${s.is_opener ? ' <span class="pill st-confirmed">Opener</span>' : ''}${s.is_closer ? ' <span class="pill st-confirmed">Closer</span>' : ''}${s.is_encore ? ' <span class="pill st-confirmed">Encore</span>' : ''}<div class="small muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></td>
       <td class="num">${esc(s.song_key || '')}${s.capo ? `<div class="small muted">capo ${s.capo}</div>` : ''}</td>
       <td class="r num">${mins(s.length_min)}</td>
       <td class="hide-sm">${esc(s.lead_vox || '')}</td>
@@ -990,6 +1056,9 @@ function songModal(s) {
       <label class="f w2">Genre<input class="in" data-s="genre" list="genreList" value="${esc(s.genre || '')}"><datalist id="genreList">${[...new Set(S.songs.map(x => x.genre).filter(Boolean))].sort().map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
       <label class="f">Energy (1–5)<select class="in" data-s="energy"><option value="">—</option>${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${s.energy === n ? 'selected' : ''}>${n} ${['', 'mellow', 'easy', 'groove', 'lively', 'barn-burner'][n]}</option>`).join('')}</select></label>
       <label class="f">Tuning<select class="in" data-s="tuning">${['Standard', 'Half step down', 'Drop D', 'Other'].map(x => `<option ${(s.tuning || 'Standard') === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+      <label class="f">Opener?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_opener" ${s.is_opener ? 'checked' : ''}> Opens a set</span></label>
+      <label class="f">Closer?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_closer" ${s.is_closer ? 'checked' : ''}> Closes a set</span></label>
+      <label class="f">Encore?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_encore" ${s.is_encore ? 'checked' : ''}> After the last set</span></label>
       ${f('year', 'Year', 'number')}${f('added_on', 'Learned', 'date')}${f('default_set', 'Default set', 'number')}${f('default_order', 'Default order', 'number')}
       ${f('chart_url', 'Chart link (PDF / Drive)', 'url', 'w4')}
       <label class="f w4">Notes<input class="in" data-s="comment" value="${esc(s.comment || '')}" placeholder="e.g. tuning half step down"></label>
@@ -1400,6 +1469,13 @@ function after(sec, id) {
 }
 function rerenderKeepFocus(sel) { const el = $(sel); const pos = el ? el.selectionStart : 0; render(); const n = $(sel); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch {} } }
 
+document.addEventListener('change', e => {
+  if (!(e.target.matches && e.target.matches('#modalRoot [data-optplan]') && S._opt)) return;
+  const was = { ...(S._opt.plan || {}) }; readOpt(); const now = S._opt.plan;
+  if (e.target.dataset.optplan === 'set_count' && n0(was.break_count) === n0(was.set_count) - 1) now.break_count = Math.max(0, Math.round(n0(now.set_count) || 1) - 1);   // keep "a break between each set"
+  S._opt.res = null; refreshOpt();
+});
+
 document.addEventListener('submit', async e => {
   if (e.target.id !== 'loginForm') return; e.preventDefault();
   const msg = $('#lgMsg'); msg.textContent = '';
@@ -1499,11 +1575,11 @@ const ACTIONS = {
     r.break_count = Math.min(Math.max(0, Math.round(r.break_count)), r.set_count - 1);
     await guard(() => save('setlists', r), 'Plan updated'); render();
   },
-  'opt-open': ({ g }) => { S._opt = { lid: g.id, prefs: optPrefs(g), res: null }; openModal(optModal(g, S._opt.prefs, null)); },
+  'opt-open': ({ g }) => { const pl = planOf(g); S._opt = { lid: g.id, prefs: optPrefs(g), res: null, plan: { start_time: g.start_time || '', hours: g.hours ?? '', set_count: pl.sets, break_count: pl.breaks, break_min: pl.breakMin } }; openModal(optModal(optCtx(g.id), S._opt.prefs, null)); },
   'opt-w': ({ el, v }) => { S._opt.prefs.w[el.dataset.k] = Number(v); readOpt(); refreshOpt(); },
   'opt-shape': ({ v }) => { S._opt.prefs.shape = v; readOpt(); refreshOpt(); },
   'opt-run': () => {
-    readOpt(); const g = slCtx(byId('setlists', S._opt.lid)); const pr = S._opt.prefs;
+    readOpt(); const g = optCtx(S._opt.lid); const pr = S._opt.prefs;
     if (!Object.values(pr.pools).some(Boolean)) return toast('Pick at least one song pool.', true);
     if (!g.hours) toast('No slot length set — using the default set length.');
     S._opt.res = optimizeSetlist(g, pr, Date.now()); refreshOpt();
@@ -1517,7 +1593,10 @@ const ACTIONS = {
     const ok = await guard(async () => {
       if (drop.length) { await api.remove('setlist_items', { id: drop }); S.setlist_items = S.setlist_items.filter(i => !drop.includes(i.id)); }
       await saveMany('setlist_items', rows);
-      await save('setlists', { ...byId('setlists', L.id), set_count: res.plan.sets, plan: { ...(L.plan || {}), opt: S._opt.prefs } });
+      const p = S._opt.plan || {}, gig = gigOf(L), sv = { ...byId('setlists', L.id), set_count: res.plan.sets, break_count: res.plan.breaks, break_min: res.plan.breakMin, plan: { ...(L.plan || {}), opt: S._opt.prefs } };
+      sv.start_time = p.start_time && !(gig && p.start_time === gig.start_time) ? p.start_time : null;
+      sv.hours = p.hours != null && p.hours !== '' && !(gig && Number(p.hours) === n0(gig.hours)) ? Number(p.hours) : null;
+      await save('setlists', sv);
       return true;
     }, `Setlist built — ${rows.length} songs`);
     if (ok) { closeModal(); render(); }
@@ -1548,7 +1627,7 @@ const ACTIONS = {
   'song-new': () => openModal(songModal({ status: 'learning', added_on: todayIso() })),
   'song-save': async ({ id }) => {
     const s = id ? { ...byId('songs', id) } : { id: uuid() };
-    $$('[data-s]').forEach(i => { const k = i.dataset.s; if (k === 'length_fmt') { const m = i.value.trim().match(/^(\d+)(?::(\d{1,2}))?$/); s.length_min = m ? +m[1] + (+(m[2] || 0)) / 60 : null; } else if (k === 'energy') s[k] = i.value ? Number(i.value) : null; else s[k] = i.type === 'number' ? (i.value === '' ? null : Number(i.value)) : (i.value.trim() || null); });
+    $$('[data-s]').forEach(i => { const k = i.dataset.s; if (k === 'length_fmt') { const m = i.value.trim().match(/^(\d+)(?::(\d{1,2}))?$/); s.length_min = m ? +m[1] + (+(m[2] || 0)) / 60 : null; } else if (k === 'energy') s[k] = i.value ? Number(i.value) : null; else if (i.type === 'checkbox') s[k] = i.checked; else s[k] = i.type === 'number' ? (i.value === '' ? null : Number(i.value)) : (i.value.trim() || null); });
     const parts = {}; $$('[data-part]').forEach(i => { if (i.value.trim()) parts[i.dataset.part] = i.value.trim(); }); s.parts = Object.keys(parts).length ? parts : null;
     if (!s.title) return toast('Give the song a title.', true);
     if (await guard(() => save('songs', s), 'Song saved')) { closeModal(); render(); }
@@ -1575,8 +1654,17 @@ const ACTIONS = {
   'save-payees': async () => { const rows = S.payees.map(p => ({ ...p })); $$('[data-p]').forEach(i => { const r = rows.find(x => x.id === i.dataset.p); r[i.dataset.k] = i.value.trim() || null; }); await guard(() => saveMany('payees', rows), 'Pay-to saved'); render(); },
   'payee-new': async () => { await guard(() => save('payees', { id: uuid(), name: 'New pay-to', is_default: false })); render(); },
 };
-function readOpt() { $$('#modalRoot [data-opt]').forEach(i => { const [a, b] = i.dataset.opt.split('.'); if (b) S._opt.prefs[a][b] = i.checked; else S._opt.prefs[a] = i.checked; }); }
-function refreshOpt() { const m = $('#modalRoot .modal'); const sc = m ? m.parentElement.scrollTop : 0; openModal(optModal(slCtx(byId('setlists', S._opt.lid)), S._opt.prefs, S._opt.res)); const n = $('#modalRoot .scrim'); if (n) n.scrollTop = sc; }
+function optCtx(lid) {                                  // the setlist with the optimizer window's plan values laid over it
+  const g = slCtx(byId('setlists', lid)), p = S._opt && S._opt.plan; if (!p) return g;
+  const r = { ...g, start_time: p.start_time || null, hours: p.hours === '' || p.hours == null ? null : Number(p.hours), break_min: p.break_min == null ? g.break_min : n0(p.break_min) };
+  r.set_count = Math.max(1, Math.round(n0(p.set_count) || 1));
+  r.break_count = p.break_count == null || p.break_count === '' ? null : Math.min(Math.max(0, Math.round(n0(p.break_count))), r.set_count - 1);
+  return r;
+}
+function readOpt() {
+  $$('#modalRoot [data-optnum]').forEach(i => { S._opt.prefs[i.dataset.optnum] = Math.max(0, Math.round(n0(i.value))); });
+  const pl = {}; $$('#modalRoot [data-optplan]').forEach(i => { const k = i.dataset.optplan; pl[k] = k === 'start_time' ? i.value.trim() : (i.value === '' ? '' : Number(i.value)); }); if (Object.keys(pl).length) S._opt.plan = pl; $$('#modalRoot [data-opt]').forEach(i => { const [a, b] = i.dataset.opt.split('.'); if (b) S._opt.prefs[a][b] = i.checked; else S._opt.prefs[a] = i.checked; }); }
+function refreshOpt() { const m = $('#modalRoot .modal'); const sc = m ? m.parentElement.scrollTop : 0; openModal(optModal(optCtx(S._opt.lid), S._opt.prefs, S._opt.res)); const n = $('#modalRoot .scrim'); if (n) n.scrollTop = sc; }
 function readX(x) { $$('#modalRoot [data-x]').forEach(i => { const k = i.dataset.x; x[k] = i.type === 'checkbox' ? i.checked : i.type === 'number' ? (i.value === '' ? null : Number(i.value)) : (i.value.trim() || null); }); }
 function collectGig(g) {
   const r = { ...g };
