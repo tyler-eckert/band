@@ -259,11 +259,10 @@ function loginView() {
     <form class="fm" id="loginForm">
       <img src="assets/logo.png" alt="Trailer Folk">
       ${title('Band HQ')}
-      <p class="muted" style="margin-top:-8px">Gigs, setlists, invoices and the money — all in one place. Band members only.</p>
       <div class="stack">
         <label class="f">Email<input class="in" id="lgEmail" type="email" autocomplete="username" required></label>
         <label class="f">Password<input class="in" id="lgPass" type="password" autocomplete="current-password"></label>
-        <div class="row"><button class="btn gold" type="submit">Sign in</button><button class="btn" type="button" data-act="magic">Email me a sign-in link</button></div>
+        <div class="row"><button class="btn gold" type="submit">Sign in</button></div>
         <p class="small" id="lgMsg" style="color:var(--bad);min-height:1.5em"></p>
       </div>
     </form></div>`;
@@ -383,7 +382,7 @@ function durText(g) {
 }
 function gigHead(g) {
   const practice = g.kind === 'practice';
-  const price = !practice && isMgr() && n0(g.quote) > 0 ? money(g.quote) : '';
+  const price = !practice && n0(g.quote) > 0 ? money(g.quote) : '';
   const tm = timeRange(g.start_time, g.end_time);
   return `${titleSolid(practice ? 'Practice' : g.title)}
   <div class="row" style="align-items:baseline;margin:-6px 0 16px;gap:10px"><div class="grow" style="font-size:16px;line-height:1.35">${esc(longDate(g.gig_date))}${tm ? ' <span class="muted num">' + tm + durText(g) + '</span>' : ''}</div>${price ? `<div class="num" style="font-size:26px;font-weight:800;color:var(--gold);white-space:nowrap" title="Quoted">${price}</div>` : ''}</div>`;
@@ -441,7 +440,7 @@ function setlistSets(L, compact) {
     </section>`; }).join('')}</div>`;
 }
 function gigRead(g) {
-  const st = settings(), c = clientOf(g) || {}, practice = g.kind === 'practice', mgr = isMgr(), L = listOf(g.id);
+  const st = settings(), c = clientOf(g) || {}, practice = g.kind === 'practice', mgr = true, L = listOf(g.id);   // everything except the roster is open to all members
   const tbd = '<span class="faint">TBD</span>';
   const kv = (l, v) => `<div><div class="eyebrow">${l}</div><div class="v num">${v}</div></div>`;
   const mapUrl = (g.venue || g.address) ? 'https://maps.apple.com/?q=' + encodeURIComponent([g.venue, g.address].filter(Boolean).join(', ')) : '';
@@ -469,8 +468,7 @@ function gigRead(g) {
       <div class="row"><div class="grow"><b>Quote</b><div class="small muted">${g.quote_no ? esc(g.quote_no) + ' · sent ' + mdY(g.quoted_on) : 'Not sent yet'}</div></div><button class="btn sm gold" data-act="pdf" data-v="quote">Quote PDF</button></div>
       <div class="row"><div class="grow"><b>Invoice</b><div class="small muted">${g.invoice_no ? esc(g.invoice_no) + ' · ' + mdY(g.invoiced_on) : 'Not invoiced yet'}</div></div><button class="btn sm gold" data-act="pdf" data-v="invoice">Invoice PDF</button></div>
       <div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="mail" data-v="quote">Quote email</button><button class="btn sm" data-act="mail" data-v="deposit">Deposit reminder</button><button class="btn sm" data-act="mail" data-v="details">Gig-week details</button><button class="btn sm" data-act="mail" data-v="invoice">Invoice email</button><button class="btn sm" data-act="mail" data-v="thanks">Thank-you</button></div>
-    </div></section>
-    ${g.status === 'complete' ? payoutPanel(g) : ''}`;
+    </div></section>`;
   return `
   <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a></div>
   ${gigHead(g)}
@@ -554,7 +552,6 @@ function gigEdit(g) {
     <details class="panel fold" data-fold="cal" ${foldOpen('cal')}><summary><h2 class="sec">Calendar</h2><span class="sum">Add to your phone</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
       <div class="row"><button class="btn sm" data-act="ics-one">Add to my calendar (.ics)</button></div>
     </div></details>
-    ${practice || g.status !== 'complete' ? '' : payoutPanel(g)}
    </div>
   </div>`;
 }
@@ -624,7 +621,7 @@ function calendarView() {
        <p class="small muted" style="margin-top:0">Subscribe once and every gig and practice shows up in your own calendar. Gigs start at load-in and run until an hour after the show ends. Updates flow in automatically (Apple refreshes about hourly; Google can take up to a day).</p>
        <label class="f">Calendar feed URL<input class="in" readonly value="${esc(feed)}" id="feedUrl"></label>
        <div class="row" style="margin-top:10px"><button class="btn sm gold" data-act="copy-feed">Copy URL</button><a class="btn sm" href="${esc(feed.replace(/^https:/, 'webcal:'))}">Open in Apple Calendar</a><button class="btn sm" data-act="ics-all">Download .ics instead</button></div>
-       <p class="small faint">Google Calendar: Other calendars → + → From URL → paste. Anyone with this link can read the schedule${isMgr() ? '; <a href="#" data-act="rotate-token">reset the link</a> if it gets shared too widely' : ''}.</p>
+       <p class="small faint">Google Calendar: Other calendars → + → From URL → paste. Anyone with this link can read the schedule${true ? '; <a href="#" data-act="rotate-token">reset the link</a> if it gets shared too widely' : ''}.</p>
      </section>
    </div>`;
 }
@@ -1155,23 +1152,23 @@ function merchItemModal(i) {
 /* ============================================================ settings / band */
 function settingsView() {
   const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
-  const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}" ${mgr ? '' : 'disabled'}></label>`;
+  const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}"></label>`;
   return `${title('The Band')}
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
   </section>
   <section class="team" style="margin-bottom:18px">${ms.filter(m => m.active).map(m => `<div class="mate"><img src="${photo(m)}" alt="${esc(m.name)}"><div class="plate"><small>${esc(m.instrument || '')}</small>${esc(m.name)}</div></div>`).join('')}</section>
   <div class="grid g2">
-    <section class="panel"><h2 class="sec">Roster & logins</h2>
-      <p class="small muted" style="margin-top:0">Each person signs in with the email listed here. ${mgr ? 'Create their login in Supabase → Authentication → Users (same email), or have them use “Email me a sign-in link”.' : 'Only managers can change the roster.'}</p>
+    ${mgr ? `<section class="panel"><h2 class="sec">Roster & logins</h2>
+      <p class="small muted" style="margin-top:0">Each person signs in with the email listed here. Create their login in Supabase → Authentication → Users (same email).</p>
       <table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Linked</th></tr></thead><tbody>
       ${ms.map(m => `<tr><td><b>${esc(m.name)}</b><div class="small muted">${esc(m.instrument || '')}</div></td>
-        <td><input class="in" data-m="${m.id}" data-k="email" value="${esc(m.email || '')}" ${mgr ? '' : 'disabled'} placeholder="email"></td>
-        <td><select class="in" style="min-width:112px" data-m="${m.id}" data-k="role" ${mgr ? '' : 'disabled'}><option ${m.role === 'member' ? 'selected' : ''}>member</option><option ${m.role === 'manager' ? 'selected' : ''}>manager</option></select></td>
+        <td><input class="in" data-m="${m.id}" data-k="email" value="${esc(m.email || '')}" placeholder="email"></td>
+        <td><select class="in" style="min-width:112px" data-m="${m.id}" data-k="role"><option ${m.role === 'member' ? 'selected' : ''}>member</option><option ${m.role === 'manager' ? 'selected' : ''}>manager</option></select></td>
         <td class="small">${m.user_id ? '<span style="color:var(--ok)">Yes</span>' : '<span class="faint">Not yet</span>'}</td></tr>`).join('')}
       </tbody></table>
-      ${mgr ? '<div class="row" style="margin-top:12px"><button class="btn gold sm" data-act="save-members">Save roster</button></div>' : ''}
-    </section>
+      <div class="row" style="margin-top:12px"><button class="btn gold sm" data-act="save-members">Save roster</button></div>
+    </section>` : ''}
     <section class="panel"><h2 class="sec">Quotes & invoices</h2>
       <div class="fgrid">
         ${f('band_email', 'Band email', 'w2')}${f('default_terms', 'Terms')}${f('quote_valid_days', 'Quote good for (days)', '', 'number')}
@@ -1186,7 +1183,7 @@ function settingsView() {
         ${f('set_target_min', 'Set length target (min)', 'w2', 'number')}${f('song_buffer_sec', 'Between songs (sec)', 'w2', 'number')}
         ${f('band_fund_pct', 'Band fund % of each gig', 'w2', 'number')}
       </div>
-      ${mgr ? '<div class="row" style="margin-top:12px"><button class="btn gold sm" data-act="save-settings">Save settings</button></div>' : ''}
+      <div class="row" style="margin-top:12px"><button class="btn gold sm" data-act="save-settings">Save settings</button></div>
     </section>
     <section class="panel"><h2 class="sec">Pay-to on invoices</h2>
       ${S.payees.map(p => `<div class="fgrid" style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line-soft)">
