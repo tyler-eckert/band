@@ -98,8 +98,17 @@ async function prefetchUpcoming() {                                  // save cha
     }
   } finally { preRunning = false; }
 }
+/* If Supabase doesn't have a newer column yet, save everything else and say so (instead of refusing the whole save). */
+async function upsertTolerant(table, rows) {
+  rows = rows.map(r => ({ ...r })); const dropped = new Set();
+  for (let k = 0; k < 8; k++) {
+    try { const out = await api.upsert(table, rows); if (dropped.size) toast(`Saved — but ${[...dropped].join(', ')} can’t be stored until the latest SQL update is run in Supabase.`, true); return out; }
+    catch (e) { const m = /Could not find the '(\w+)' column of '(\w+)'/.exec((e && e.message) || ''); if (!m || !(m[1] in rows[0])) throw e; dropped.add(m[1]); rows.forEach(r => delete r[m[1]]); }
+  }
+  throw new Error('Could not save — the database is missing several columns. Run the latest SQL update in Supabase.');
+}
 async function save(table, row) {
-  const [saved] = await api.upsert(table, [row]);
+  const [saved] = await upsertTolerant(table, [row]);
   const keys = PK[table] || ['id'];
   const i = S[table].findIndex(r => keys.every(k => r[k] === saved[k]));
   if (i >= 0) S[table][i] = saved; else S[table].push(saved);
@@ -107,7 +116,7 @@ async function save(table, row) {
 }
 async function saveMany(table, rows) {
   if (!rows.length) return [];
-  const saved = await api.upsert(table, rows);
+  const saved = await upsertTolerant(table, rows);
   const keys = PK[table] || ['id'];
   saved.forEach(r => { const i = S[table].findIndex(x => keys.every(k => x[k] === r[k])); if (i >= 0) S[table][i] = r; else S[table].push(r); });
   snapSaveSoon(); return saved;
