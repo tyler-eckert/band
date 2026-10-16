@@ -1,4 +1,4 @@
-Trailer Folk HQ - latest full set (rev 7, index.html loads app.js?v=13)
+Trailer Folk HQ - latest full set (rev 9, index.html loads app.js?v=15)
 
 FILES (all current):
   index.html
@@ -7,17 +7,19 @@ FILES (all current):
   supabase/02_seed.sql                                              (your data - do NOT commit to a public repo)
   supabase/05_view_edit_checklist.sql                               load-in time + checklist columns
   supabase/06_gig_photos.sql                                        gig photos + storage bucket
-  supabase/07_open_settings.sql                                     NEW - lets every member edit band settings
+  supabase/07_open_settings.sql                                     lets every member edit band settings
+  supabase/08_song_opener_closer.sql                                Opener?/Closer? flags on songs
+  supabase/09_song_encore.sql                                       NEW - Encore? flag on songs
   supabase/functions/band-calendar/index.ts                         load-in start / +1hr end, no reminders
 
 NOT INCLUDED (keep your existing copies): CNAME, assets/, vendor/
 
-Order: run any SQL you haven't run yet (05, 06, 07 - each is safe to re-run)
+Order: run any SQL you haven't run yet (05 to 09 - each is safe to re-run)
        -> push index.html + app.js to GitHub -> redeploy band-calendar.
 
 Checksums:
-ad54efd033b7301c25f1d6cf3e0811f5  ./app.js
-d743dfd35e7fe3e94ed9ab1db2776479  ./index.html
+70e8ad503da3a515ecf81e893caf6541  ./app.js
+e99687e93f0af5e56eb4427ccbab436d  ./index.html
 9e3c9acaba3374f07733b0146977da39  ./supabase/01_schema.sql
 3cb9a13c127a1ff46b289fef5c4b7e22  ./supabase/02_seed.sql
 3a55a92b09df5b3f80b3df697d27f1f0  ./supabase/03_setlist_planner.sql
@@ -25,4 +27,6 @@ bac4e184d7bb10a923852b7a0e5a0764  ./supabase/04_setlists.sql
 c78fe2515b1c4e986e0f1038d2c71fde  ./supabase/05_view_edit_checklist.sql
 392b9a24fe67e8f3c4207aadeab2e807  ./supabase/06_gig_photos.sql
 24e827b963c5eac2183981d21563a404  ./supabase/07_open_settings.sql
+5805cdebd45142c28a0dcd163cc5f521  ./supabase/08_song_opener_closer.sql
+6c36e77f63311370d51f9687c49ddd38  ./supabase/09_song_encore.sql
 c882d7f44d923c03007100fcad2aff43  ./supabase/functions/band-calendar/index.ts
