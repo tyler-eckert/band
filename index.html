@@ -66,7 +66,7 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .top{position:relative;flex:none;z-index:20;display:flex;align-items:stretch;justify-content:space-between;gap:12px;
   padding:0 max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left));
   padding-top:calc(max(env(safe-area-inset-top, 0px), 20px) + 18px);
-  background:linear-gradient(180deg,rgba(14,10,1,.97),rgba(14,10,1,.88));backdrop-filter:blur(8px);border-bottom:1px solid var(--line-soft)}
+  background:#0e0a01;border-bottom:1px solid var(--line-soft)}   /* solid, like the status-bar strip and the footer: nothing scrolls under it any more, so no see-through haze */
 .brand{display:flex;align-items:center;gap:12px;text-decoration:none;padding:8px 0 6px}
 .brand img{height:50px;width:auto;display:block;overflow:visible}
 .brand span{font-family:var(--display);font-stretch:125%;font-weight:800;font-size:12px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
@@ -362,6 +362,6 @@ body.offline [data-text-size]{pointer-events:auto;opacity:1}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=20"></script>
+<script src="app.js?v=21"></script>
 </body>
 </html>
