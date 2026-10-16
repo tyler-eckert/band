@@ -343,6 +343,18 @@ a.back:active{background:rgba(243,238,228,.14)}
 .toast{z-index:120}
 /* page text size (Settings → Text size; Auto = a bit larger from iPad width up) */
 main.view,.modal>*{zoom:var(--tz,1)}
+/* ---------- offline (view-only) ---------- */
+.offline-bar{flex:none;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;padding:6px 12px;background:#2a1d05;color:var(--gold);font-size:13px;border-bottom:1px solid var(--line)}
+body.offline :is([data-act="gig-edit"],[data-act="sl-edit"],[data-act^="new-"],[data-act="sl-new"],[data-act="song-new"],[data-act="set-status"],[data-act^="exp-"],[data-act^="sale-"],[data-act^="merch-"],[data-act="opt-open"],[data-act="set-default"],[data-act="set-clear-ask"],[data-act="sl-dup"],[data-act="sl-del-ask"],[data-act="sl-unassign"],[data-act="rotate-token"],[data-act="save-settings"],[data-act="save-members"],[data-act="song-save"],[data-act="photo-del"],[data-act^="chart-del"],[data-act="chart-use"]),
+body.offline label:has(:is([data-photo],[data-chart-import],[data-chart-up])){display:none!important}
+body.offline :is(.chk,.stars:not(.ro),[data-chart-default],[data-text-size]){pointer-events:none;opacity:.45}
+body.offline [data-text-size]{pointer-events:auto;opacity:1}
+.gm-dn{padding:2px 14px 12px 50px;color:var(--gold);font-style:italic;font-size:15px;line-height:1.35;border-top:0}
+.snote-edit textarea.in{min-height:46px;resize:vertical;font-size:14px;line-height:1.35}
+.ptr{position:fixed;left:50%;transform:translateX(-50%);z-index:60;background:var(--gold);color:#140e02;font-weight:700;font-size:13px;padding:7px 16px;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);pointer-events:none}
+/* iPad: header up, footer down (the phone offsets were too much on a tablet) */
+@media (min-width:700px){ .top{padding-top:calc(env(safe-area-inset-top,0px) + 2px)} }
+@media (min-width:700px) and (max-width:980px){ .tabbar{bottom:-20px;padding-bottom:22px} }
 </style>
 </head>
 <body>
@@ -350,6 +362,6 @@ main.view,.modal>*{zoom:var(--tz,1)}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=18"></script>
+<script src="app.js?v=20"></script>
 </body>
 </html>
