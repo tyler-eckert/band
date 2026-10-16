@@ -531,7 +531,7 @@ function gigRead(g) {
   return `
   <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a></div>
   ${gigHead(g)}
-  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${!practice && L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode" title="Gig mode">&gt;&gt;</button>' : ''}<button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
+  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${!practice && L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button>' : ''}<button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
   ${stepper}
   ${right ? `<div class="split"><div class="stack">${left}</div><div class="stack">${right}</div></div>` : `<div class="stack" style="max-width:820px">${left}</div>`}`;
 }
@@ -806,7 +806,7 @@ function setlistRead(id) {
   ].filter(Boolean);
   return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="back">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
   ${title(slName(L), `Setlist · ${items.length} songs · ${hm(total)} of music`)}
-  <div class="row" style="margin-bottom:14px"><button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode" title="Gig mode">&gt;&gt;</button><button class="btn" data-act="sl-edit">Edit</button><button class="btn" data-act="pl-export">Playlist export</button><button class="btn" data-act="set-pdf">Stage PDF</button><button class="btn" data-act="set-text">Copy as text</button></div>
+  <div class="row" style="margin-bottom:14px"><button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button><button class="btn" data-act="sl-edit">Edit</button><button class="btn" data-act="pl-export">Playlist export</button><button class="btn" data-act="set-pdf">Stage PDF</button><button class="btn" data-act="set-text">Copy as text</button></div>
   <section class="panel" style="margin-bottom:14px"><div class="kv">${facts.join('')}</div>${L.notes ? `<p style="margin:14px 0 0;white-space:pre-wrap">${esc(L.notes)}</p>` : ''}</section>
   ${setlistSets(L, false)}`;
 }
