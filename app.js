@@ -1120,7 +1120,24 @@ function songsView() {
       <td class="hide-sm small muted">${(stats[s.id] || {}).last ? mdY(stats[s.id].last) : '—'}</td></tr>`; }).join('')}</tbody>
   </table></div></section>`;
 }
-function songModal(s) {
+function songModal(s, edit) { return s && s.id && !edit ? songView(s) : songForm(s); }
+function songView(s) {                                              // condensed read-only card: nothing here can be changed by accident
+  const ms = activeMembers(), p = s.parts || {}, st = songStats()[s.id] || {};
+  const kv = (l, v) => v ? `<div><div class="eyebrow">${l}</div><div class="num" style="font-size:16px;font-weight:600;margin-top:2px">${v}</div></div>` : '';
+  const flags = [s.is_opener && 'Good opener', s.is_closer && 'Good closer', s.is_encore && 'Good encore'].filter(Boolean);
+  const parts = ms.filter(m => p[m.name]).map(m => `<span><b>${esc(m.name)}</b> ${esc(p[m.name])}</span>`).join('');
+  const rates = S.song_ratings.filter(x => x.song_id === s.id), avg = avgRating(s.id);
+  return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop data-songview>
+    <div class="row" style="align-items:flex-start;gap:10px"><div class="grow"><h2 class="sec" style="margin:0;font-size:24px">${esc(s.title)}</h2><div class="muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></div><button class="btn gold" data-act="song-edit-mode" data-id="${s.id}">Edit</button><button class="btn ghost" data-act="modal-close">✕</button></div>
+    <div class="row" style="margin:10px 0 4px;gap:6px;flex-wrap:wrap"><span class="pill" style="color:var(--muted)">${cap(s.status || 'active')}</span>${flags.map(f => `<span class="pill st-confirmed">${f}</span>`).join('')}</div>
+    <div class="kv" style="margin-top:12px">${kv('Key', s.song_key ? esc(s.song_key) + (s.capo ? ` · capo ${s.capo}` : '') : '')}${kv('BPM', s.bpm ? String(s.bpm) : '')}${kv('Length', s.length_min ? mins(s.length_min) : '')}${kv('Tuning', esc(s.tuning || 'Standard'))}${kv('Starts it', esc(s.starter || ''))}${kv('Lead vox', esc(s.lead_vox || ''))}${kv('Genre', esc(s.genre || ''))}${kv('Energy', s.energy ? '▮'.repeat(s.energy) + ` <span class="small muted">${s.energy}/5</span>` : '')}${kv('Plays', String(st.plays || 0))}${kv('Last played', st.last ? mdY(st.last) : '—')}</div>
+    ${s.comment ? `<p style="margin:14px 0 0;white-space:pre-wrap">${esc(s.comment)}</p>` : ''}
+    ${parts ? `<h2 class="sec" style="margin-top:16px">Who plays what</h2><div class="row small" style="gap:6px 18px;flex-wrap:wrap">${parts}</div>` : ''}
+    <h2 class="sec" style="margin-top:16px">Charts (PDF)</h2>${chartBox(s, true)}
+    <h2 class="sec" style="margin-top:16px">Band ratings${avg ? ` <span class="small muted" style="font-weight:400">avg ${avg.toFixed(1)}</span>` : ''}</h2><div class="row small" style="gap:6px 18px;flex-wrap:wrap">${ms.map(m => { const r = rates.find(x => x.member_id === m.id); return `<span>${esc(m.name)} <span class="stars ro">${starsRO(r && r.rating)}</span></span>`; }).join('')}</div>
+  </div></div>`;
+}
+function songForm(s) {
   const ms = activeMembers(), p = s.parts || {};
   const f = (k, l, type = 'text', cls = '') => `<label class="f ${cls}">${l}<input class="in" data-s="${k}" type="${type}" value="${esc(s[k] ?? '')}" ${type === 'number' ? 'step="any"' : ''}></label>`;
   return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop>
@@ -1144,7 +1161,7 @@ function songModal(s) {
     <h2 class="sec" style="margin-top:18px">Who plays what</h2>
     <div class="fgrid">${ms.map(m => `<label class="f">${esc(m.name)}<input class="in" data-part="${esc(m.name)}" value="${esc(p[m.name] || '')}"></label>`).join('')}</div>
     ${s.id ? `<h2 class="sec" style="margin-top:18px">Band ratings</h2><div class="row small">${ms.map(m => { const r = S.song_ratings.find(x => x.song_id === s.id && x.member_id === m.id); return `<span>${esc(m.name)} <span class="stars ro">${starsRO(r && r.rating)}</span></span>`; }).join('')}</div>` : ''}
-    <div class="row" style="margin-top:18px"><button class="btn gold" data-act="song-save" data-id="${s.id || ''}">Save song</button><span class="spacer"></span>${s.id ? `<span id="songDelWrap"><button class="btn danger sm" data-act="song-del-ask">Delete</button></span>` : ''}</div>
+    <div class="row" style="margin-top:18px"><button class="btn gold" data-act="song-save" data-id="${s.id || ''}">Save song</button>${s.id ? `<button class="btn" data-act="song-view" data-id="${s.id}">Cancel</button>` : ''}<span class="spacer"></span>${s.id ? `<span id="songDelWrap"><button class="btn danger sm" data-act="song-del-ask">Delete</button></span>` : ''}</div>
   </div></div>`;
 }
 
@@ -1584,20 +1601,20 @@ function matchSong(fileName) {
   });
   return bs >= .5 ? best : null;
 }
-function chartBox(s) {
+function chartBox(s, ro) {
   const me = S.me; if (!me) return '<div id="chartBox"></div>';
   const mine = chartOf(s.id, me.id), res = chartFor(s.id), others = S.song_charts.filter(c => c.song_id === s.id && c.member_id !== me.id);
   const nm = id => (byId('members', id) || {}).name || 'A bandmate', using = res ? res.chart.member_id : null;
   const row = (label, right, on) => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line-soft);gap:8px;flex-wrap:wrap"><div class="grow"><b>${label}</b>${on ? ' <span class="pill st-confirmed">In use</span>' : ''}</div>${right}</div>`;
   return `<div id="chartBox">
-    ${row('My chart', mine ? `<span class="small muted">${esc(mine.filename || 'chart.pdf')}</span><button class="btn sm" data-act="chart-open" data-id="${mine.id}">Open</button><label class="btn sm" style="cursor:pointer">Replace<input type="file" accept="application/pdf" hidden data-chart-up="${s.id}"></label><button class="btn sm danger" data-act="chart-del" data-id="${mine.id}">Remove</button>`
+    ${row('My chart', ro ? (mine ? `<span class="small muted">${esc(mine.filename || 'chart.pdf')}</span><button class="btn sm" data-act="chart-open" data-id="${mine.id}">Open</button>` : '<span class="small muted">none yet</span>') : mine ? `<span class="small muted">${esc(mine.filename || 'chart.pdf')}</span><button class="btn sm" data-act="chart-open" data-id="${mine.id}">Open</button><label class="btn sm" style="cursor:pointer">Replace<input type="file" accept="application/pdf" hidden data-chart-up="${s.id}"></label><button class="btn sm danger" data-act="chart-del" data-id="${mine.id}">Remove</button>`
       : `<label class="btn sm gold" style="cursor:pointer">Upload my PDF<input type="file" accept="application/pdf" hidden data-chart-up="${s.id}"></label>`, using === me.id)}
-    ${others.map(c => row(`${esc(nm(c.member_id))}’s chart`, `<button class="btn sm" data-act="chart-open" data-id="${c.id}">Open</button>${using === c.member_id ? '' : `<button class="btn sm" data-act="chart-use" data-sid="${s.id}" data-m="${c.member_id}">Use theirs</button>`}`, using === c.member_id)).join('')}
-    ${mine && using !== me.id ? `<div class="row" style="padding-top:8px"><button class="btn sm" data-act="chart-use" data-sid="${s.id}" data-m="own">Use my own instead</button></div>` : ''}
-    ${!res ? '<p class="small muted" style="margin:8px 0 0">No chart yet — upload yours, or use a bandmate’s once they add theirs.</p>' : ''}
+    ${others.map(c => row(`${esc(nm(c.member_id))}’s chart`, `<button class="btn sm" data-act="chart-open" data-id="${c.id}">Open</button>${ro || using === c.member_id ? '' : `<button class="btn sm" data-act="chart-use" data-sid="${s.id}" data-m="${c.member_id}">Use theirs</button>`}`, using === c.member_id)).join('')}
+    ${!ro && mine && using !== me.id ? `<div class="row" style="padding-top:8px"><button class="btn sm" data-act="chart-use" data-sid="${s.id}" data-m="own">Use my own instead</button></div>` : ''}
+    ${!res ? `<p class="small muted" style="margin:8px 0 0">${ro ? 'No chart yet — tap Edit to upload yours or use a bandmate’s.' : 'No chart yet — upload yours, or use a bandmate’s once they add theirs.'}</p>` : ''}
   </div>`;
 }
-function refreshChartBox(songId) { const b = $('#chartBox'); const s = byId('songs', songId); if (b && s) b.outerHTML = chartBox(s); render(); }
+function refreshChartBox(songId) { const b = $('#chartBox'); const s = byId('songs', songId); if (b && s) b.outerHTML = chartBox(s, !!$('#modalRoot [data-songview]')); render(); }
 function importModal() {
   const rows = S._imp.rows, n = rows.filter(r => r.songId).length;
   const opts = sel => '<option value="">— skip —</option>' + S.songs.slice().sort((a, b) => a.title.localeCompare(b.title)).map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${esc(s.title)}${s.artist ? ' — ' + esc(s.artist) : ''}</option>`).join('');
@@ -1961,13 +1978,15 @@ const ACTIONS = {
   // songs
   rate: async ({ id, v }) => { if (!S.me) return; const cur = myRating(id); const val = Number(v); if (cur === val) { await guard(() => api.remove('song_ratings', { song_id: id, member_id: S.me.id })); S.song_ratings = S.song_ratings.filter(r => !(r.song_id === id && r.member_id === S.me.id)); } else await guard(() => save('song_ratings', { song_id: id, member_id: S.me.id, rating: val })); render(); },
   'song-edit': ({ id, e }) => { if (e.target.closest('.stars')) return; openModal(songModal(byId('songs', id))); },
+  'song-edit-mode': ({ id }) => openModal(songModal(byId('songs', id), true)),
+  'song-view': ({ id }) => openModal(songModal(byId('songs', id))),
   'song-new': () => openModal(songModal({ status: 'learning', added_on: todayIso() })),
   'song-save': async ({ id }) => {
     const s = id ? { ...byId('songs', id) } : { id: uuid() };
     $$('[data-s]').forEach(i => { const k = i.dataset.s; if (k === 'length_fmt') { const m = i.value.trim().match(/^(\d+)(?::(\d{1,2}))?$/); s.length_min = m ? +m[1] + (+(m[2] || 0)) / 60 : null; } else if (k === 'energy') s[k] = i.value ? Number(i.value) : null; else if (i.type === 'checkbox') s[k] = i.checked; else s[k] = i.type === 'number' ? (i.value === '' ? null : Number(i.value)) : (i.value.trim() || null); });
     const parts = {}; $$('[data-part]').forEach(i => { if (i.value.trim()) parts[i.dataset.part] = i.value.trim(); }); s.parts = Object.keys(parts).length ? parts : null;
     if (!s.title) return toast('Give the song a title.', true);
-    if (await guard(() => save('songs', s), 'Song saved')) { closeModal(); render(); }
+    if (await guard(() => save('songs', s), 'Song saved')) { if (id) openModal(songModal(byId('songs', id))); else closeModal(); render(); }
   },
   'song-del-ask': ({ el }) => { el.parentElement.innerHTML = `<span class="confirm">Delete from the book and every setlist? <button class="btn danger sm" data-act="song-del">Delete</button></span>`; },
   'song-del': async () => { const id = $('[data-act="song-save"]').dataset.id; await guard(() => del('songs', id), 'Deleted'); S.setlist_items = S.setlist_items.filter(i => i.song_id !== id); closeModal(); render(); },
