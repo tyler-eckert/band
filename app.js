@@ -251,7 +251,7 @@ const ICON = {
   money: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 6.5c0-1.9-2.2-3-5-3s-5 1.3-5 3.3 2 2.8 5 3.4 5 1.4 5 3.5-2.2 3.3-5 3.3-5-1.1-5-3"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
 };
-const NAV = [['home','Home','home'],['gigs','Gigs','gigs'],['calendar','Calendar','cal'],['setlists','Setlists','set'],['songs','Songs','songs'],['money','Metrics','money'],['settings','Band','gear']];
+const NAV = [['home','Home','home'],['gigs','Gigs','gigs'],['setlists','Setlists','set'],['songs','Songs','songs'],['money','Metrics','money'],['settings','Band','gear']];
 
 function shell(route, inner) {
   const sec = route.split('/')[0];
@@ -286,9 +286,10 @@ function render() {
   if (!S.session) return app.innerHTML = loginView();
   if (!S.loaded) return app.innerHTML = shell('home', '<p class="muted">Loading the band book…</p>');
   if (!S.me) return app.innerHTML = notMemberView();
-  const route = (location.hash || '#home').slice(1);
+  let route = (location.hash || '#home').slice(1);
+  if (route === 'calendar') { route = 'home'; history.replaceState(null, '', '#home'); }              // the calendar now lives at the bottom of Home
   const [sec, id] = route.split('/');
-  const views = { home: homeView, gigs: gigsView, gig: () => gigView(id), calendar: calendarView, setlists: setlistsView, setlist: () => setlistView(id), songs: songsView, money: moneyView, settings: settingsView };
+  const views = { home: homeView, gigs: gigsView, gig: () => gigView(id), setlists: setlistsView, setlist: () => setlistView(id), songs: songsView, money: moneyView, settings: settingsView };
   const sc0 = $('.scroll'), y = sc0 ? sc0.scrollTop : 0, same = S._route === route;
   app.innerHTML = shell(route, (views[sec] || homeView)());
   const sc1 = $('.scroll'); if (sc1) sc1.scrollTop = same ? y : 0;
@@ -352,7 +353,7 @@ function homeView() {
   <section class="panel" style="margin-bottom:18px">
     <div class="row"><h2 class="sec" style="margin:0">Needs attention</h2><span class="spacer"></span><span class="small muted">${att.length} item${att.length === 1 ? '' : 's'}</span></div>
     <div class="list" style="margin-top:8px">${att.length ? att.slice(0, 14).map(a => `
-      <a class="li" href="${a.href || (a.act === 'Build set' ? (listOf(a.g.id) ? '#setlist/' + listOf(a.g.id).id : '#gig/' + a.g.id) : a.act === 'Add practice' ? '#calendar' : '#gig/' + a.g.id)}" style="align-items:flex-start">
+      <a class="li" href="${a.act === 'Add practice' ? '#' : (a.href || (a.act === 'Build set' ? (listOf(a.g.id) ? '#setlist/' + listOf(a.g.id).id : '#gig/' + a.g.id) : '#gig/' + a.g.id))}" ${a.act === 'Add practice' ? 'data-act="new-practice"' : ''} style="align-items:flex-start">
         <span class="sev ${a.sev}"></span>
         <div class="grow"><div class="t">${a.g ? esc(a.g.title) : 'Band'}</div><div class="small muted" style="white-space:normal">${esc(a.text)}</div></div>
         <span class="btn sm">${a.act}</span></a>`).join('') : '<div class="empty">All caught up. Nothing needs you right now.</div>'}
@@ -363,7 +364,8 @@ function homeView() {
     ${kpi(pNow, `Practices in ${yr}`, vs(pNow, pPrev))}
     ${kpi(nd == null ? '—' : nd, 'Days until next gig', nextGig ? esc(nextGig.title) + ' · ' + mdY(nextGig.gig_date) : 'No gig booked')}
     ${kpi(lastGig ? days(lastGig.gig_date, t) : '—', 'Days since last gig', lastGig ? esc(lastGig.title) + ' · ' + mdY(lastGig.gig_date) : '')}
-  </div>`;
+  </div>
+  ${calendarSection()}`;
 }
 const addBtns = (big, mt = '12px') => `<div class="row" style="margin:${mt} 0 ${big ? '14px' : '0'}"><button class="btn ${big ? '' : 'sm '}gold" data-act="new-gig">+ Gig / lead</button><button class="btn ${big ? '' : 'sm '}gold" data-act="new-practice">+ Practice</button></div>`;
 const kpi = (v, l, d) => `<div class="panel kpi"><div class="l">${l}</div><div class="v num">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
@@ -628,8 +630,8 @@ function payoutPanel(g) {
     </tbody></table></div></details>`;
 }
 
-/* ============================================================ calendar */
-function calendarView() {
+/* ============================================================ calendar (bottom of Home) */
+function calendarSection() {
   const base = UI.calMonth ? pd(UI.calMonth + '-01') : new Date(today().getFullYear(), today().getMonth(), 1);
   const three = UI.calSpan === '3mo', nMonths = three ? 3 : 1;
   const t = todayIso(), st = settings();
@@ -654,7 +656,7 @@ function calendarView() {
   const label = three ? `${months[0].toLocaleDateString('en-US', { month: 'short' })} – ${last.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}` : base.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const feed = `${SUPABASE_URL.replace('.supabase.co', '.functions.supabase.co')}/${CAL_FUNCTION}?token=${st.ics_token || ''}`;
   const rangeList = S.gigs.filter(g => g.gig_date && g.gig_date >= rangeFrom && g.gig_date <= rangeTo).sort((a, b) => a.gig_date.localeCompare(b.gig_date));
-  return `${title('Calendar')}
+  return `<h2 class="sec2">Calendar</h2>
    <div class="row" style="margin-bottom:12px">
      <button class="btn sm" data-act="cal-move" data-v="-1">←</button>
      <b class="disp" style="font-size:20px;color:var(--gold);min-width:210px;text-align:center">${label}</b>
