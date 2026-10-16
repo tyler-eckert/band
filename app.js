@@ -34,6 +34,9 @@ const api = window.__BAND_MOCK__ || {
     const { data, error } = await supa.from(table).upsert(rows, { onConflict: (PK[table] || ['id']).join(',') }).select();
     if (error) throw error; return data;
   },
+  async uploadPhoto(path, blob) { const { error } = await supa.storage.from('band-photos').upload(path, blob, { contentType: 'image/jpeg' }); if (error) throw error; },
+  async photoUrl(path) { const { data, error } = await supa.storage.from('band-photos').createSignedUrl(path, 3600); if (error) throw error; return data.signedUrl; },
+  async removePhoto(path) { const { error } = await supa.storage.from('band-photos').remove([path]); if (error) throw error; },
   async remove(table, match) {
     let q = supa.from(table).delete();
     for (const [k, v] of Object.entries(match)) q = Array.isArray(v) ? q.in(k, v) : q.eq(k, v);
@@ -43,6 +46,7 @@ const api = window.__BAND_MOCK__ || {
 
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
+S._noteOpen = {};
 
 async function loadAll() {
   const res = await Promise.all(TABLES.map(t => api.all(t)));
@@ -117,7 +121,8 @@ function download(filename, data, type) {
 
 /* ============================================================ domain */
 const STATUSES = ['inquiry','quoted','confirmed','complete','passed','cancelled'];
-const STATUS_LABEL = { inquiry: 'Inquiry', quoted: 'Quoted', confirmed: 'Booked', complete: 'Played', passed: 'Passed', cancelled: 'Cancelled' };
+const STATUS_LABEL = { inquiry: 'Inquiry', quoted: 'Inquiry', confirmed: 'Booked', complete: 'Played', passed: 'Passed/Cancelled', cancelled: 'Passed/Cancelled' };
+const STATUS_PICK = [['inquiry', 'Inquiry', ['inquiry', 'quoted']], ['confirmed', 'Booked', ['confirmed']], ['complete', 'Played', ['complete']], ['passed', 'Passed/Cancelled', ['passed', 'cancelled']]];
 const isGig = g => g.kind === 'gig';
 const live = g => isGig(g) && !['passed','cancelled'].includes(g.status);
 const salesFor = id => S.merch_sales.filter(s => s.gig_id === id).reduce((a, s) => a + n0(s.amount), 0);
@@ -202,7 +207,7 @@ const ICON = {
   money: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 6.5c0-1.9-2.2-3-5-3s-5 1.3-5 3.3 2 2.8 5 3.4 5 1.4 5 3.5-2.2 3.3-5 3.3-5-1.1-5-3"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
 };
-const NAV = [['home','Home','home'],['gigs','Gigs','gigs'],['calendar','Calendar','cal'],['setlists','Setlists','set'],['songs','Songs','songs'],['money','Money','money'],['settings','Band','gear']];
+const NAV = [['home','Home','home'],['gigs','Gigs','gigs'],['calendar','Calendar','cal'],['setlists','Setlists','set'],['songs','Songs','songs'],['money','Metrics','money'],['settings','Band','gear']];
 
 function shell(route, inner) {
   const sec = route.split('/')[0];
@@ -219,7 +224,7 @@ function shell(route, inner) {
   <div class="scroll"><main class="view">${inner}</main></div>
   <nav class="tabbar">${NAV.filter(n => n[0] !== 'settings').map(([k, l, i]) => `<a href="#${k}" class="${on(k)}">${ICON[i]}${l}</a>`).join('')}</nav>`;
 }
-const title = (t, sub) => `<h1 class="echo disp"><span class="solid">${esc(t)}</span><span class="ghost" aria-hidden="true">${esc(t)}</span></h1>${sub ? `<p class="muted" style="margin:-10px 0 22px">${sub}</p>` : ''}`;
+const title = (t, sub) => `<h1 class="echo disp"><span class="solid">${esc(t)}</span></h1>${sub ? `<p class="muted" style="margin:-10px 0 22px">${sub}</p>` : ''}`;
 
 const titleSolid = (t, sub) => `<h1 class="echo disp"><span class="solid">${esc(t)}</span></h1>${sub ? `<p class="muted" style="margin:-10px 0 16px">${sub}</p>` : ''}`;
 const cbm = good => UI.cb ? (good ? '✓ ' : '▲ ') : '';
@@ -295,9 +300,9 @@ function homeView() {
        ${next.kind === 'gig' ? `<div class="row" style="margin-top:12px">${statusPill(next)}<span class="small muted">${setItems(next.id).length ? setItems(next.id).length + ' songs on the setlist' : 'No setlist yet'}</span></div>` : ''}
      </div></a>` : `<div class="next" style="margin-bottom:18px"><div><div class="eyebrow">Next up</div><div class="when">Nothing booked</div><div class="muted">Add a lead or a practice to get the calendar moving.</div></div></div>`}
   <section class="panel" style="margin-bottom:18px">
-    <h2 class="sec">Coming up</h2>
-    <div class="list">${up.slice(0, 6).map(gigLi).join('') || '<div class="empty">Nothing on the calendar.</div>'}</div>
-    <div class="row" style="margin-top:12px"><button class="btn sm gold" data-act="new-gig">+ Lead / gig</button><button class="btn sm" data-act="new-practice">+ Practice</button></div>
+    <div class="row"><h2 class="sec" style="margin:0">Coming up</h2><span class="spacer"></span><span class="small muted">${up.length} scheduled</span></div>
+    <div class="list up-scroll" style="margin-top:8px">${up.map(gigLi).join('') || '<div class="empty">Nothing on the calendar.</div>'}</div>
+    ${addBtns(false)}
   </section>
   <section class="panel" style="margin-bottom:18px">
     <div class="row"><h2 class="sec" style="margin:0">Needs attention</h2><span class="spacer"></span><span class="small muted">${att.length} item${att.length === 1 ? '' : 's'}</span></div>
@@ -315,6 +320,7 @@ function homeView() {
     ${kpi(lastGig ? days(lastGig.gig_date, t) : '—', 'Days since last gig', lastGig ? esc(lastGig.title) + ' · ' + mdY(lastGig.gig_date) : '')}
   </div>`;
 }
+const addBtns = (big, mt = '12px') => `<div class="row" style="margin:${mt} 0 ${big ? '14px' : '0'}"><button class="btn ${big ? '' : 'sm '}gold" data-act="new-gig">+ Gig / lead</button><button class="btn ${big ? '' : 'sm '}gold" data-act="new-practice">+ Practice</button></div>`;
 const kpi = (v, l, d) => `<div class="panel kpi"><div class="l">${l}</div><div class="v num">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
 function gigLi(g) {
   const d = pd(g.gig_date);
@@ -345,13 +351,13 @@ function gigsView() {
   rows.sort((a, b) => (a.gig_date || '9999').localeCompare(b.gig_date || '9999') * (asc ? 1 : -1));
   const years = [...new Set(S.gigs.map(g => yearOf(g.gig_date)).filter(Boolean))].sort((a, b) => b - a);
   const counts = k => S.gigs.filter({ leads: g => isGig(g) && ['inquiry','quoted'].includes(g.status), booked: g => isGig(g) && g.status === 'confirmed' }[k]).length;
-  return `${title('Gigs', 'Every lead, booking, practice and pass — the old Gig List and Passed tabs in one place.')}
+  return `${title('Gigs')}
+   ${addBtns(true, '0px')}
    <div class="row" style="margin-bottom:14px">
      <div class="chips">${[['upcoming','Upcoming'],['leads',`Leads (${counts('leads')})`],['booked',`Booked (${counts('booked')})`],['played','Played'],['practices','Practices'],['passed','Passed'],['all','All']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-act="gig-filter" data-v="${k}">${l}</button>`).join('')}</div>
      <span class="spacer"></span>
      <select class="in" id="gigYear" style="width:auto"><option value="all">All years</option>${years.map(y => `<option ${UI.gigYear == y ? 'selected' : ''}>${y}</option>`).join('')}</select>
      <input class="in" id="gigSearch" placeholder="Search" value="${esc(UI.gigSearch)}" style="width:180px">
-     <button class="btn gold" data-act="new-gig">+ Lead / gig</button><button class="btn" data-act="new-practice">+ Practice</button>
    </div>
    <section class="panel"><div class="list">${rows.map(gigLi).join('') || '<div class="empty">Nothing here.</div>'}</div></section>`;
 }
@@ -361,6 +367,54 @@ function gigView(id) {
   const g = byId('gigs', id);
   if (!g) return `${title('Not found')}<p class="muted">That gig may have been deleted. <a href="#gigs">Back to gigs</a></p>`;
   return S.editGig === id ? gigEdit(g) : gigRead(g);
+}
+const longDate = d => { const x = pd(d); return x ? x.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'Date TBD'; };
+function timeRange(s, e) {
+  s = String(s || '').trim(); e = String(e || '').trim();
+  if (!s || !e) return esc(s || e);
+  const ap = x => (/\s*(am|pm)\s*$/i.exec(x) || [])[1];
+  const s2 = ap(s) && ap(e) && ap(s).toLowerCase() === ap(e).toLowerCase() ? s.replace(/\s*(am|pm)\s*$/i, '') : s;
+  return `${esc(s2)} - ${esc(e)}`;
+}
+function durText(g) {
+  const a = parseTime(g.start_time), b = parseTime(g.end_time); let m = null;
+  if (a && b) { m = b[0] * 60 + b[1] - (a[0] * 60 + a[1]); if (m <= 0) m += 1440; } else if (g.hours) m = n0(g.hours) * 60;
+  return m ? ` (${+(m / 60).toFixed(1)}hr)` : '';
+}
+function gigHead(g) {
+  const practice = g.kind === 'practice';
+  const price = !practice && isMgr() && n0(g.quote) > 0 ? money(g.quote) : '';
+  const tm = timeRange(g.start_time, g.end_time);
+  return `${titleSolid(practice ? 'Practice' : g.title)}
+  <div class="row" style="align-items:baseline;margin:-6px 0 16px;gap:10px"><div class="grow" style="font-size:16px;line-height:1.35">${esc(longDate(g.gig_date))}${tm ? ' <span class="muted num">' + tm + durText(g) + '</span>' : ''}</div>${price ? `<div class="num" style="font-size:26px;font-weight:800;color:var(--gold);white-space:nowrap" title="Quoted">${price}</div>` : ''}</div>`;
+}
+/* ---- gig photos (load-in map, stage plot…) ---- */
+const photosOf = g => Array.isArray(g.photos) ? g.photos : [];
+const photoCache = {};
+async function photoSrc(path) { const c = photoCache[path]; if (c && c.exp > Date.now()) return c.url; const url = await api.photoUrl(path); photoCache[path] = { url, exp: Date.now() + 50 * 60e3 }; return url; }
+function hydratePhotos() { $$('img[data-ph]').forEach(async img => { if (img.getAttribute('src')) return; try { img.src = await photoSrc(img.dataset.ph); } catch { img.alt = 'Photo unavailable'; } }); }
+function downscale(file, max = 1800) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => { const k = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight)); const c = document.createElement('canvas'); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url); c.toBlob(b => b ? res(b) : rej(new Error('Could not read that image')), 'image/jpeg', .85); };
+    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Could not read that image')); };
+    im.src = url;
+  });
+}
+async function addGigPhoto(g, file) {
+  if (!g || !file) return;
+  try {
+    toast('Uploading photo…'); const blob = await downscale(file); const path = `gigs/${g.id}/${uuid()}.jpg`;
+    await api.uploadPhoto(path, blob);
+    const cur = byId('gigs', g.id);
+    const ok = await guard(() => save('gigs', { ...cur, photos: [...photosOf(cur), { path, added: todayIso() }] }), 'Photo added');
+    if (ok && !S.dirty) render(); else if (ok) toast('Photo added — it shows after you save.');
+  } catch (e) { toast(e.message || 'Upload failed', true); }
+}
+function photosPanel(g, editing) {
+  const ph = photosOf(g);
+  return `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Photos</h2><span class="spacer"></span><label class="btn sm gold" style="cursor:pointer">+ Add photo<input type="file" accept="image/*" hidden data-photo="${g.id}"></label></div>
+    ${ph.length ? `<div class="photos" style="margin-top:12px">${ph.map(p => `<div class="ph"><img data-ph="${esc(p.path)}" data-act="photo-open" alt="Gig photo">${editing ? `<button class="ib" data-act="photo-del" data-path="${esc(p.path)}" title="Remove photo">✕</button>` : ''}</div>`).join('')}</div>` : '<p class="small muted" style="margin:10px 0 0">Load-in map, stage plot, parking — add a photo and everyone can see it here.</p>'}</section>`;
 }
 const CHECKS = [['deposit_received', 'Deposit received'], ['paperwork_signed', 'Paperwork signed'], ['invoice_sent', 'Invoice sent'], ['paid_in_full', 'Paid in full'], ['details_sent', 'Gig details sent to client']];
 function checklistPanel(g) {
@@ -382,7 +436,7 @@ function setlistSets(L, compact) {
       ${its.map((i, k) => { const s = byId('songs', i.song_id) || { title: '(deleted song)' }; const c = changes(prev, s); prev = s;
         const warn = compact ? '' : [c.tuning ? `<span style="color:var(--bad)">${cbm(false)}retune → ${esc(s.tuning || 'Standard')}</span>` : '', ...c.inst.map(x => `<span style="color:var(--gold)">${esc(x.who)}: ${esc(x.to)}</span>`)].filter(Boolean).join(' · ');
         return `<div class="song"><span class="n">${k + 1}</span><div style="min-width:0"><div class="nm">${esc(s.title)}</div>
-          <div class="meta">${esc(songLabel(s))}${compact ? '' : ' · ' + mins(s.length_min) + (s.lead_vox ? ' · ' + esc(s.lead_vox) : '')}</div>${warn ? `<div class="meta">⇄ ${warn}</div>` : ''}</div><span></span></div>`; }).join('')}
+          <div class="meta">${esc(songLabel(s))}${compact ? '' : ' · ' + mins(s.length_min) + (s.lead_vox ? ' · ' + esc(s.lead_vox) : '')}</div>${warn ? `<div class="meta">⇄ ${warn}</div>` : ''}</div><span></span></div>${i.note ? `<div class="snote">${esc(i.note)}</div>` : ''}`; }).join('')}
       ${brk && brk.kind === 'break' && n < plan.sets ? `<div class="small muted" style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">Break · ${brk.dur} min${brk.from ? ` · ${brk.from}–${brk.to}` : ''}</div>` : ''}
     </section>`; }).join('')}</div>`;
 }
@@ -391,7 +445,7 @@ function gigRead(g) {
   const tbd = '<span class="faint">TBD</span>';
   const kv = (l, v) => `<div><div class="eyebrow">${l}</div><div class="v num">${v}</div></div>`;
   const mapUrl = (g.venue || g.address) ? 'https://maps.apple.com/?q=' + encodeURIComponent([g.venue, g.address].filter(Boolean).join(', ')) : '';
-  const stepper = practice || !mgr ? '' : `<div class="chips" style="margin-bottom:14px">${STATUSES.map(s => `<button class="chip ${g.status === s ? 'on' : ''}" data-act="set-status" data-v="${s}">${STATUS_LABEL[s]}</button>`).join('')}</div>`;
+  const stepper = practice || !mgr ? '' : `<div class="chips" style="margin-bottom:14px">${STATUS_PICK.map(([s, l, grp]) => `<button class="chip ${grp.includes(g.status) ? 'on' : ''}" data-act="set-status" data-v="${s}">${l}</button>`).join('')}</div>`;
   const facts = practice
     ? [kv('Date', esc(fmtDate(g.gig_date))), kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd), kv('Where', g.venue ? esc(g.venue) : tbd)]
     : [kv('Date', esc(fmtDate(g.gig_date))), kv('Load-in', g.load_in_time ? esc(g.load_in_time) : tbd), kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd),
@@ -400,6 +454,7 @@ function gigRead(g) {
       <div style="margin-top:12px">${L ? setlistSets(L, true) : `<p class="muted" style="margin:0">${g.songs_played_legacy ? g.songs_played_legacy + ' songs played (count from the old sheet).' : 'No setlist yet.'}</p>`}</div></section>`;
   const left = `<section class="panel"><h2 class="sec">Details</h2><div class="kv">${facts.join('')}</div></section>
     ${g.notes ? `<section class="panel"><h2 class="sec">${practice ? 'Plan' : 'Notes'}</h2><p style="margin:0;white-space:pre-wrap">${esc(g.notes)}</p></section>` : ''}
+    ${photosPanel(g, false)}
     ${setlistPanel}`;
   const money_rows = [['Quote', g.quote != null ? money(g.quote) : ''], ['Deposit', n0(g.deposit_amount) ? money(g.deposit_amount) + (g.deposit_received ? ' · received' : ' · owed') : ''], ['Paid (less deposit)', g.paid != null ? money(g.paid) : ''], ['Tips', n0(g.tips) ? money(g.tips) : ''], ['Merch', merchOf(g) ? money(merchOf(g)) : '']].filter(r => r[1]);
   const right = practice || !mgr ? '' : `
@@ -417,8 +472,8 @@ function gigRead(g) {
     </div></section>
     ${g.status === 'complete' ? payoutPanel(g) : ''}`;
   return `
-  <div class="row" style="margin-bottom:6px"><a href="#gigs" class="small">← Gigs</a></div>
-  ${titleSolid(practice ? 'Practice' : g.title, esc(fmtDate(g.gig_date, true)))}
+  <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a></div>
+  ${gigHead(g)}
   <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span><button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
   ${stepper}
   ${right ? `<div class="split"><div class="stack">${left}</div><div class="stack">${right}</div></div>` : `<div class="stack" style="max-width:820px">${left}</div>`}`;
@@ -427,11 +482,11 @@ function gigEdit(g) {
   const st = settings(), c = clientOf(g) || {}, practice = g.kind === 'practice';
   const items = setItems(g.id);
   const f = (key, label, type = 'text', cls = '', extra = '') => `<label class="f ${cls}">${label}<input class="in" data-f="${key}" type="${type}" value="${esc(g[key] ?? '')}" ${type === 'number' ? 'step="any" inputmode="decimal"' : ''} ${extra}></label>`;
-  const stepper = practice ? '' : `<div class="chips" style="margin-bottom:6px">${STATUSES.map(s => `<button class="chip ${g.status === s ? 'on' : ''}" data-act="set-status" data-v="${s}">${STATUS_LABEL[s]}</button>`).join('')}</div>`;
+  const stepper = practice ? '' : `<div class="chips" style="margin-bottom:6px">${STATUS_PICK.map(([s, l, grp]) => `<button class="chip ${grp.includes(g.status) ? 'on' : ''}" data-act="set-status" data-v="${s}">${l}</button>`).join('')}</div>`;
   const totalDur = items.reduce((a, i) => a + n0((byId('songs', i.song_id) || {}).length_min), 0);
   return `
-  <div class="row" style="margin-bottom:6px"><a href="#gigs" class="small">← Gigs</a><span class="spacer"></span><span class="pill st-confirmed">Editing</span></div>
-  ${titleSolid(practice ? 'Practice' : g.title, `${fmtDate(g.gig_date, true)}${g.start_time ? ' · ' + esc(g.start_time) : ''}${g.venue ? ' · ' + esc(g.venue) : ''}`)}
+  <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a><span class="spacer"></span><span class="pill st-confirmed">Editing</span></div>
+  ${gigHead(g)}
   <div class="row">${stepper}<span class="spacer"></span><button class="btn sm ghost" data-act="fold-all" data-v="1">Expand all</button><button class="btn sm ghost" data-act="fold-all" data-v="0">Collapse all</button></div>
   <div class="split" style="margin-top:14px">
    <div class="stack">
@@ -448,6 +503,7 @@ function gigEdit(g) {
       </div>
     </div></details>
     ${practice ? '' : checklistPanel(g)}
+    ${photosPanel(g, true)}
     ${practice ? '' : `
     <details class="panel fold" data-fold="client" ${foldOpen('client')}><summary><h2 class="sec">Client</h2><span class="sum">${esc([c.contact_name, c.org].filter(Boolean).join(' — ') || 'No client yet')}</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
       <div class="fgrid">
@@ -563,9 +619,9 @@ function calendarView() {
    <section class="panel" style="padding:10px">${months.map(d => `${three ? `<div class="cal-month">${d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>` : ''}${monthGrid(d.getFullYear(), d.getMonth())}`).join('')}</section>
    <div class="split" style="margin-top:16px">
      <section class="panel"><h2 class="sec">${three ? 'Next 3 months' : 'This month'}</h2><div class="list">${rangeList.map(gigLi).join('') || `<div class="empty">Nothing ${three ? 'in these months' : 'this month'}.</div>`}</div>
-       <div class="row" style="margin-top:12px"><button class="btn sm gold" data-act="new-gig">+ Lead / gig</button><button class="btn sm" data-act="new-practice">+ Practice</button></div></section>
+       ${addBtns(false)}</section>
      <section class="panel"><h2 class="sec">Sync to your phone</h2>
-       <p class="small muted" style="margin-top:0">Subscribe once and every gig and practice shows up in your own calendar. Gigs start at load-in and run until an hour after the show ends, with reminders the day before and two hours before. Updates flow in automatically (Apple refreshes about hourly; Google can take up to a day).</p>
+       <p class="small muted" style="margin-top:0">Subscribe once and every gig and practice shows up in your own calendar. Gigs start at load-in and run until an hour after the show ends. Updates flow in automatically (Apple refreshes about hourly; Google can take up to a day).</p>
        <label class="f">Calendar feed URL<input class="in" readonly value="${esc(feed)}" id="feedUrl"></label>
        <div class="row" style="margin-top:10px"><button class="btn sm gold" data-act="copy-feed">Copy URL</button><a class="btn sm" href="${esc(feed.replace(/^https:/, 'webcal:'))}">Open in Apple Calendar</a><button class="btn sm" data-act="ics-all">Download .ics instead</button></div>
        <p class="small faint">Google Calendar: Other calendars → + → From URL → paste. Anyone with this link can read the schedule${isMgr() ? '; <a href="#" data-act="rotate-token">reset the link</a> if it gets shared too widely' : ''}.</p>
@@ -591,8 +647,8 @@ function setlistsView() {
       <div class="grow"><div class="t">${esc(g.title)}</div><div class="s" style="color:var(--gold)">Needs a setlist</div></div>
       <button class="btn sm gold" data-act="sl-new" data-gig="${g.id}">New</button>
       ${drafts.length ? `<select class="in" data-act-change="sl-attach" data-gig="${g.id}" style="width:auto;max-width:170px"><option value="">Use a draft…</option>${drafts.map(L => `<option value="${L.id}">${esc(slName(L))}</option>`).join('')}</select>` : ''}</div>`; };
-  return `${title('Setlists', 'Build a set any time — for a gig that isn’t booked yet, a showcase, or a go-to list — then assign it to a gig when one comes in.')}
-   <div class="row" style="margin-bottom:14px"><button class="btn gold" data-act="sl-new">+ New setlist</button><span class="small muted">Drafts aren’t tied to a gig until you assign them.</span></div>
+  return `${title('Setlists')}
+   <div class="row" style="margin-bottom:14px"><button class="btn gold" data-act="sl-new">+ New setlist</button></div>
    <div class="grid g2" style="align-items:start">
      <div class="stack">
        <section class="panel"><h2 class="sec">Drafts</h2><div class="list">${drafts.map(slLi).join('') || '<div class="empty">No drafts. Start one with <b>+ New setlist</b>.</div>'}</div></section>
@@ -672,7 +728,7 @@ function setlistRead(id) {
     kv('Sets', `${plan.sets}${plan.breaks ? ` · ${plan.breaks} break${plan.breaks === 1 ? '' : 's'} (${plan.breakMin} min)` : ''}`),
     g.hours ? kv('Slot', hm(n0(g.hours) * 60)) : '',
   ].filter(Boolean);
-  return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="small">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
+  return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="back">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
   ${title(slName(L), `Setlist · ${items.length} songs · ${hm(total)} of music`)}
   <div class="row" style="margin-bottom:14px"><button class="btn gold" data-act="sl-edit">Edit</button><button class="btn" data-act="set-pdf">Stage PDF</button><button class="btn" data-act="set-text">Copy as text</button></div>
   <section class="panel" style="margin-bottom:14px"><div class="kv">${facts.join('')}</div>${L.notes ? `<p style="margin:14px 0 0;white-space:pre-wrap">${esc(L.notes)}</p>` : ''}</section>
@@ -711,8 +767,9 @@ function setlistEdit(id) {
             ${sets.length > 1 ? `<button class="ib" title="Move to next set" data-act="si-set" data-id="${i.id}">⇄</button>` : ''}
             <button class="ib" title="${i.pinned ? 'Unpin' : 'Pin here (optimizer won’t move it)'}" data-act="si-pin" data-id="${i.id}" style="${i.pinned ? 'color:var(--gold)' : ''}">⚑</button>
             <button class="ib" title="${i.played ? 'Mark skipped' : 'Mark played'}" data-act="si-played" data-id="${i.id}">${i.played ? '✓' : '○'}</button>
+            <button class="ib" title="Note after this song (announcement, swap…)" data-act="si-note" data-id="${i.id}" style="${i.note ? 'color:var(--gold)' : ''}">✎</button>
             <button class="ib" title="Remove" data-act="si-del" data-id="${i.id}">✕</button>
-          </div></div>`; }).join('') || '<p class="small muted">Click songs in the book to add them here, or let the optimizer build it.</p>'}
+          </div></div>${i.note || S._noteOpen[i.id] ? `<div class="snote-edit"><input class="in" data-si-note="${i.id}" value="${esc(i.note || '')}" placeholder="Between songs — announcement, instrument swap, story…"></div>` : ''}`; }).join('') || '<p class="small muted">Click songs in the book to add them here, or let the optimizer build it.</p>'}
       ${brk && brk.kind === 'break' ? `<div class="small muted" style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">Break · ${brk.dur} min${brk.from ? ` · ${brk.from}–${brk.to}` : ''}</div>` : ''}
     </section>`;
   }).join('');
@@ -720,11 +777,12 @@ function setlistEdit(id) {
   const openGigs = S.gigs.filter(x => isGig(x) && !listOf(x.id) && live(x)).sort((a, b) => (a.gig_date || '9').localeCompare(b.gig_date || '9'));
   const q = UI.libSearch.toLowerCase();
   const stats = songStats();
-  const lib = S.songs.filter(s => (UI.libFilter === 'all' || s.status === UI.libFilter) && (!q || (s.title + ' ' + (s.artist || '') + ' ' + (s.genre || '')).toLowerCase().includes(q)))
+  const usedSel = new Set(items.filter(i => i.set_no === UI.selSet).map(i => i.song_id)), inSet = {}; items.forEach(i => { if (i.set_no !== UI.selSet) inSet[i.song_id] = i.set_no; });
+  const lib = S.songs.filter(s => !usedSel.has(s.id) && (UI.libFilter === 'all' || s.status === UI.libFilter) && (!q || (s.title + ' ' + (s.artist || '') + ' ' + (s.genre || '')).toLowerCase().includes(q)))
     .sort((a, b) => (a.default_set || 99) - (b.default_set || 99) || (a.default_order || 999) - (b.default_order || 999) || a.title.localeCompare(b.title));
   const total = Object.values(setDur).reduce((a, b) => a + b, 0);
   const pf = (k, l, v, extra = '') => `<label class="f">${l}<input class="in" type="number" min="0" step="any" data-plan="${k}" value="${esc(v ?? '')}" ${extra}></label>`;
-  return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="small">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
+  return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="back">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
   ${title(slName(L), `Setlist · ${items.length} songs · ${hm(total)} of music`)}
   <div class="row" style="margin-bottom:14px"><span class="pill st-confirmed">Editing</span><span class="spacer"></span><button class="btn gold" data-act="sl-view">Done</button></div>
   <section class="panel" style="margin-bottom:14px">
@@ -766,11 +824,11 @@ function setlistEdit(id) {
   <div class="split">
     <div class="sets">${setCards}</div>
     <section class="panel" style="position:sticky;top:0">
-      <div class="row"><h2 class="sec" style="margin:0">Song book</h2><span class="spacer"></span><span class="small muted">adds to Set ${UI.selSet}</span></div>
+      <div class="row"><h2 class="sec" style="margin:0">Song book</h2><span class="spacer"></span><span class="small muted">adds to Set ${UI.selSet}${usedSel.size ? ` · ${usedSel.size} already in it hidden` : ''}</span></div>
       <div class="row" style="margin:10px 0"><input class="in" id="libSearch" placeholder="Search songs or genre" value="${esc(UI.libSearch)}">
         <div class="chips">${[['active','Active'],['bench','Bench'],['holiday','Holiday'],['all','All']].map(([k, l]) => `<button class="chip ${UI.libFilter === k ? 'on' : ''}" data-act="lib-filter" data-v="${k}">${l}</button>`).join('')}</div></div>
-      <div class="lib">${lib.map(s => `<div class="libi ${used.has(s.id) ? 'used' : ''}" data-act="lib-add" data-id="${s.id}">
-         <div class="grow"><div style="font-weight:600">${esc(s.title)}</div><div class="small muted">${esc(s.artist || '')} · ${esc(songLabel(s))} · ${mins(s.length_min)}${s.genre ? ' · ' + esc(s.genre) : ''}</div></div>
+      <div class="lib">${lib.map(s => `<div class="libi ${inSet[s.id] ? 'used' : ''}" data-act="lib-add" data-id="${s.id}">
+         <div class="grow"><div style="font-weight:600">${esc(s.title)}</div><div class="small muted">${esc(s.artist || '')} · ${esc(songLabel(s))} · ${mins(s.length_min)}${s.genre ? ' · ' + esc(s.genre) : ''}${inSet[s.id] ? ' · in Set ' + inSet[s.id] : ''}</div></div>
          <div style="text-align:right"><div class="stars ro">${starsRO(avgRating(s.id))}</div><div class="small faint">${(stats[s.id] || {}).plays || 0} plays</div></div></div>`).join('')}</div>
     </section>
   </div>`;
@@ -900,9 +958,9 @@ function songsView() {
   const val = s => ({ title: s.title, artist: s.artist || '', key: s.song_key || '', length: n0(s.length_min), lead: s.lead_vox || '', mine: myRating(s.id), avg: avgRating(s.id) || 0, genre: (s.genre || '') + (9 - n0(s.energy)), plays: (stats[s.id] || {}).plays || 0, last: (stats[s.id] || {}).last || '', year: s.year || 0 }[key]);
   rows.sort((a, b) => { const x = val(a), y = val(b); return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * dir; });
   const counts = Object.fromEntries(['active','bench','learning','retired','holiday'].map(k => [k, S.songs.filter(s => s.status === k).length]));
-  const th = (k, l, cls = '') => `<th data-sort="${k}" class="${cls}">${l}${UI.songSort === k ? (dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
+  const th = (k, l, cls = '') => `<th data-act="song-sort" data-v="${k}" class="${cls}">${l}${UI.songSort === k ? (dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
   const ms = activeMembers();
-  return `${title('Songs', 'The song book with keys, capos, who sings, and how the band rates each one. Rate songs with the stars — your stars are yours alone.')}
+  return `${title('Songs')}
   <div class="row" style="margin-bottom:14px">
     <div class="chips">${[['active','Active'],['learning','Learning'],['bench','Bench'],['holiday','Holiday'],['retired','Retired'],['all','All']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-act="song-filter" data-v="${k}">${l}${k !== 'all' ? ' ' + counts[k] : ''}</button>`).join('')}</div>
     <span class="spacer"></span><input class="in" id="songSearch" placeholder="Search title, artist, singer" value="${esc(UI.songSearch)}" style="width:220px"><button class="btn gold" data-act="song-new">+ Song</button>
@@ -948,6 +1006,38 @@ function songModal(s) {
 }
 
 /* ============================================================ money */
+function cumPanel(ttl, kind, t, yNow) {
+  const past = g => kind === 'gig' ? isGig(g) && ['complete', 'confirmed'].includes(g.status) : g.kind === 'practice';
+  const fut = g => kind === 'gig' ? isGig(g) && ['inquiry', 'quoted', 'confirmed'].includes(g.status) : g.kind === 'practice';
+  const doy = d => { const x = pd(d); return Math.round((x - new Date(x.getFullYear(), 0, 1)) / 864e5) + 1; };
+  const byDate = (a, b) => a.gig_date.localeCompare(b.gig_date);
+  const dated = S.gigs.filter(g => g.gig_date && yearOf(g.gig_date) <= yNow);
+  const years = [...new Set(dated.filter(g => past(g) || fut(g)).map(g => yearOf(g.gig_date)))]; if (!years.includes(yNow)) years.push(yNow);
+  years.sort((a, b) => b - a);
+  const series = years.map(y => {
+    const inY = g => yearOf(g.gig_date) === y;
+    return { y, done: dated.filter(g => inY(g) && past(g) && (y < yNow || g.gig_date <= t)).sort(byDate), todo: y === yNow ? dated.filter(g => inY(g) && fut(g) && g.gig_date > t).sort(byDate) : [] };
+  });
+  if (!series.some(s => s.done.length || s.todo.length)) return `<section class="panel"><h2 class="sec">${ttl}</h2><div class="empty">Nothing yet.</div></section>`;
+  const maxV = Math.max(1, ...series.map(s => s.done.length + s.todo.length));
+  const step = maxV <= 6 ? 1 : maxV <= 14 ? 2 : maxV <= 30 ? 5 : maxV <= 60 ? 10 : 20, top = Math.ceil(maxV / step) * step;
+  const W = 640, H = 250, pl = 34, pr = 12, pt = 14, pb = 26;
+  const x = d => pl + (W - pl - pr) * Math.min(d - 1, 365) / 365, yv = v => pt + (H - pt - pb) * (1 - v / top);
+  const stair = (ev, d0, v0) => { let c = v0, p = ''; ev.forEach(g => { c++; p += `H${x(doy(g.gig_date)).toFixed(1)}V${yv(c).toFixed(1)}`; }); return { p, c }; };
+  const pal = ['#ffbf43', '#8fb8e8', '#c9a7ff', '#f3eee4', '#7fd1b9', '#ff9ecb'], td = doy(t);
+  let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:10px" role="img" aria-label="${ttl}">`;
+  for (let v = 0; v <= top; v += step) s += `<line x1="${pl}" x2="${W - pr}" y1="${yv(v)}" y2="${yv(v)}" stroke="rgba(243,238,228,.08)"/><text x="${pl - 6}" y="${yv(v) + 4}" text-anchor="end">${v}</text>`;
+  for (let m = 0; m < 12; m++) { const a = doy(`${yNow}-${String(m + 1).padStart(2, '0')}-01`), b = m < 11 ? doy(`${yNow}-${String(m + 2).padStart(2, '0')}-01`) : 366; s += `<line x1="${x(a)}" x2="${x(a)}" y1="${H - pb}" y2="${H - pb + 4}" stroke="rgba(243,238,228,.25)"/><text x="${(x(a) + x(b)) / 2}" y="${H - 8}" text-anchor="middle">${MON[m]}</text>`; }
+  s += `<line x1="${x(td)}" x2="${x(td)}" y1="${pt}" y2="${H - pb}" stroke="rgba(243,238,228,.3)" stroke-dasharray="2 4"/>`;
+  series.slice().reverse().forEach(sr => {
+    const c = pal[series.indexOf(sr) % pal.length], cur = sr.y === yNow, a = stair(sr.done, 1, 0);
+    s += `<path d="M${x(1)} ${yv(0)}${a.p}H${x(cur ? td : 366)}" fill="none" stroke="${c}" stroke-width="${cur ? 3 : 2}" stroke-linejoin="round"><title>${sr.y}: ${sr.done.length}</title></path>`;
+    if (cur && sr.todo.length) { const b = stair(sr.todo, td, a.c); s += `<path d="M${x(td)} ${yv(a.c)}${b.p}H${x(366)}" fill="none" stroke="${c}" stroke-width="3" stroke-dasharray="7 6" stroke-linejoin="round" opacity=".85"><title>${sr.y} with everything on the calendar: ${b.c}</title></path>`; }
+  });
+  s += '</svg>';
+  const legend = series.map((sr, i) => `<span><i style="background:${pal[i % pal.length]}"></i>${sr.y} · ${sr.done.length}${sr.todo.length ? ` <span class="faint">→ ${sr.done.length + sr.todo.length} on calendar</span>` : ''}</span>`).join('');
+  return `<section class="panel"><h2 class="sec" style="margin-bottom:6px">${ttl}</h2><div class="legend">${legend}</div>${s}<p class="small faint" style="margin:6px 0 0">Dashed line = everything still on the calendar${kind === 'gig' ? ', including leads' : ''}.</p></section>`;
+}
 function moneyView() {
   const yrSel = UI.moneyYear, t = todayIso();
   const played = S.gigs.filter(g => isGig(g) && g.status === 'complete');
@@ -962,7 +1052,9 @@ function moneyView() {
   const recv = S.gigs.filter(g => balanceDue(g) > 0).sort((a, b) => a.gig_date.localeCompare(b.gig_date));
   const byYear = years.map(y => { const r = played.filter(g => yearOf(g.gig_date) === y); return { y, pay: r.reduce((a, g) => a + pay(g), 0), tips: r.reduce((a, g) => a + n0(g.tips), 0), merch: r.reduce((a, g) => a + merchOf(g), 0), n: r.length, h: r.reduce((a, g) => a + n0(g.hours), 0) }; });
   const ms = activeMembers(), st = settings();
-  return `${title('Money', 'Pay, tips and merch by gig and year; what is still owed; expenses and payouts.')}
+  return `${title('Metrics')}
+  <div class="grid g2">${cumPanel('Cumulative gigs by year', 'gig', t, new Date().getFullYear())}${cumPanel('Cumulative practices by year', 'practice', t, new Date().getFullYear())}</div>
+  <h2 class="sec2">Money</h2>
   <div class="row" style="margin-bottom:14px"><div class="chips">${['all', ...years.map(String)].map(y => `<button class="chip ${yrSel === y ? 'on' : ''}" data-act="money-year" data-v="${y}">${y === 'all' ? 'All years' : y}</button>`).join('')}</div></div>
   <div class="grid g4" style="margin-bottom:16px">
     ${kpi(money(G), 'Gross', `${rows.length} gigs played`)}
@@ -1213,7 +1305,7 @@ async function stagePdf(g) {
     doc.setFillColor(20, 14, 2); doc.rect(0, 0, W, 64, 'F');
     doc.setTextColor(255, 191, 67); doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.text(`SET ${n}`, M, 42); const rr = ros.find(r => r.kind === 'set' && r.n === n); if (rr && rr.from) { doc.setFontSize(11); doc.text(`${rr.from} - ${rr.to}`, M + 80, 41); }
     doc.setFontSize(10); doc.setTextColor(243, 238, 228); doc.setFont('helvetica', 'normal'); doc.text(`${g.title}${g.gig_date ? ' · ' + fmtDate(g.gig_date) : ''}`, W - M, 40, { align: 'right' });
-    const its = items.filter(i => i.set_no === n); const rowH = Math.min(36, (792 - 100) / Math.max(its.length, 1));
+    const its = items.filter(i => i.set_no === n); const nNotes = its.filter(i => i.note).length; const rowH = Math.min(36, (792 - 100) / Math.max(its.length + nNotes * .6, 1));
     let y = 64 + rowH;
     its.forEach((i, k) => {
       const s = byId('songs', i.song_id) || {};
@@ -1221,6 +1313,7 @@ async function stagePdf(g) {
       doc.setTextColor(10, 8, 2); doc.setFont('helvetica', 'bold'); doc.setFontSize(Math.min(22, rowH * .62)); doc.text(s.title || '', M + 24, y);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(Math.min(14, rowH * .4)); doc.setTextColor(90, 80, 60);
       doc.text(`${songLabel(s)}${s.lead_vox ? '   ' + s.lead_vox : ''}`, W - M, y, { align: 'right' });
+      if (i.note) { doc.setFont('helvetica', 'italic'); doc.setFontSize(Math.min(12, rowH * .34)); doc.setTextColor(120, 96, 30); doc.text('» ' + i.note, M + 24, y + rowH * .5, { maxWidth: W - 2 * M - 24 }); y += rowH * .6; }
       y += rowH;
     });
   });
@@ -1255,8 +1348,7 @@ function icsFor(list) {
     if (g.venue || g.address) lines.push(`LOCATION:${icsEsc([g.venue, g.address].filter(Boolean).join(', '))}`);
     const times = g.kind === 'gig' ? [g.load_in_time ? 'Load-in: ' + g.load_in_time : '', g.start_time ? 'Start: ' + g.start_time : '', g.end_time ? 'End: ' + g.end_time : ''].filter(Boolean).join('\n') : '';
     lines.push(`DESCRIPTION:${icsEsc([times, g.notes || '', location.origin + location.pathname + '#gig/' + g.id].filter(Boolean).join('\n'))}`);
-    if (g.kind === 'gig' && g.status === 'confirmed') lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Gig tomorrow', 'TRIGGER:-P1D', 'END:VALARM');
-    lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Trailer Folk', 'TRIGGER:-PT2H', 'END:VALARM', 'END:VEVENT');
+    lines.push('END:VEVENT');
   });
   lines.push('END:VCALENDAR');
   return lines.join('\r\n');
@@ -1303,6 +1395,9 @@ function after(sec, id) {
     const nm = $('#slName'), nt = $('#slNotes'); if (nm) nm.onchange = saveMeta; if (nt) nt.onchange = saveMeta;
     const as = $('#slAssign'); if (as) as.onchange = e => e.target.value && assignSetlist(id, e.target.value);
   }
+  $$('[data-photo]').forEach(inp => inp.onchange = e => { const f = e.target.files[0]; e.target.value = ''; addGigPhoto(byId('gigs', inp.dataset.photo), f); });
+  $$('[data-si-note]').forEach(el => el.onchange = async e => { const i = byId('setlist_items', el.dataset.siNote); if (!i) return; const v = e.target.value.trim() || null; if ((i.note || null) !== v) await guard(() => save('setlist_items', { ...i, note: v })); });
+  hydratePhotos();
   $$('[data-act-change="sl-attach"]').forEach(el => el.onchange = e => e.target.value && assignSetlist(e.target.value, el.dataset.gig));
   if (sec === 'gig') $$('[data-f],[data-c]').forEach(el => el.addEventListener('input', () => { S.dirty = true; const n = $('#dirtyNote'); if (n) n.textContent = 'Unsaved changes'; }));
 }
@@ -1334,6 +1429,7 @@ const ACTIONS = {
   signout: async () => { await api.signOut(); },
   'modal-close': () => closeModal(),
   'gig-filter': ({ v }) => { UI.gigFilter = v; keepUI(); render(); },
+  'song-sort': ({ v }) => { if (UI.songSort === v) UI.songSortDir = UI.songSortDir === 'desc' ? 'asc' : 'desc'; else { UI.songSort = v; UI.songSortDir = ['length', 'mine', 'avg', 'plays', 'last', 'year'].includes(v) ? 'desc' : 'asc'; } keepUI(); render(); },
   'song-filter': ({ v }) => { UI.songFilter = v; keepUI(); render(); },
   'lib-filter': ({ v }) => { UI.libFilter = v; render(); },
   'money-year': ({ v }) => { UI.moneyYear = v; keepUI(); render(); },
@@ -1358,6 +1454,14 @@ const ACTIONS = {
   'ics-all': () => download('Trailer Folk calendar.ics', icsFor(S.gigs.filter(x => x.gig_date && x.gig_date >= iso(new Date(Date.now() - 90 * 864e5)) && (x.kind === 'practice' || live(x)))), 'text/calendar'),
   'copy-feed': () => copy($('#feedUrl').value),
   'rotate-token': async () => { const st = settings(); await guard(() => save('settings', { ...st, ics_token: uuid() }), 'New link made — re-subscribe on each phone'); render(); },
+  'photo-open': ({ el }) => { if (!el.src) return; openModal(`<div class="scrim" data-act="modal-close" style="align-items:center"><img class="lightbox" src="${el.src}" alt="Gig photo"></div>`); },
+  'photo-del': async ({ el, g }) => {
+    if (!g || !confirm('Remove this photo?')) return; const path = el.dataset.path;
+    try { await api.removePhoto(path); } catch {}
+    const cur = byId('gigs', g.id); const tile = el.closest('.ph');
+    if (await guard(() => save('gigs', { ...cur, photos: photosOf(cur).filter(p => p.path !== path) }), 'Photo removed') && tile) tile.remove();
+  },
+  'si-note': ({ id }) => { S._noteOpen[id] = !S._noteOpen[id]; render(); const el = $(`[data-si-note="${id}"]`); if (el) el.focus(); },
   'gig-edit': ({ g }) => { if (!g) return; S.editGig = g.id; render(); },
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
   'gig-chk': async ({ el, g }) => {
@@ -1430,7 +1534,7 @@ const ACTIONS = {
     await guard(() => saveMany('setlist_items', ins), `${ins.length} songs added`); const L = byId('setlists', g.id); await guard(() => save('setlists', { ...L, set_count: Math.max(n0(L.set_count), ...ins.map(i => i.set_no), 1) })); render();
   },
   'set-pdf': ({ g }) => { if (!itemsOf(g.id).length) return toast('Add songs first.', true); stagePdf(g); },
-  'set-text': ({ g }) => { const its = itemsOf(g.id).filter(i => i.played); const txt = [...new Set(its.map(i => i.set_no))].map(n => `SET ${n}\n` + its.filter(i => i.set_no === n).map((i, k) => { const s = byId('songs', i.song_id) || {}; return `${k + 1}. ${s.title} (${songLabel(s)})`; }).join('\n')).join('\n\n'); copy(`${g.title}${g.gig_date ? ' — ' + fmtDate(g.gig_date) : ''}\n\n${txt}`); },
+  'set-text': ({ g }) => { const its = itemsOf(g.id).filter(i => i.played); const txt = [...new Set(its.map(i => i.set_no))].map(n => `SET ${n}\n` + its.filter(i => i.set_no === n).map((i, k) => { const s = byId('songs', i.song_id) || {}; return `${k + 1}. ${s.title} (${songLabel(s)})${i.note ? '\n   » ' + i.note : ''}`; }).join('\n')).join('\n\n'); copy(`${g.title}${g.gig_date ? ' — ' + fmtDate(g.gig_date) : ''}\n\n${txt}`); },
   // setlist records
   'sl-new': async ({ el }) => { const gid = el.dataset.gig || null; const r = await guard(() => save('setlists', { id: uuid(), gig_id: gid, name: null })); if (r) { S.editSl = r.id; location.hash = '#setlist/' + r.id; } },
   'sl-unassign': async ({ g }) => { const L = byId('setlists', g.id); await guard(() => save('setlists', { ...L, name: L.name || slName(L), gig_id: null }), 'Unassigned — kept as a draft'); render(); },
@@ -1501,7 +1605,7 @@ async function saveGigForm(g, quiet) {
 }
 async function copySetlist(toId, fromId) {                // setlist ids
   if (itemsOf(toId).length) { toast('Clear this setlist before copying another one in.', true); render(); return; }
-  const rows = itemsOf(fromId).map(i => ({ id: uuid(), setlist_id: toId, set_no: i.set_no, position: i.position, song_id: i.song_id, played: true, pinned: !!i.pinned }));
+  const rows = itemsOf(fromId).map(i => ({ id: uuid(), setlist_id: toId, set_no: i.set_no, position: i.position, song_id: i.song_id, played: true, pinned: !!i.pinned, note: i.note || null }));
   await guard(() => saveMany('setlist_items', rows), `Copied ${rows.length} songs`);
   const L = byId('setlists', toId), F = byId('setlists', fromId), n = Math.max(...rows.map(x => x.set_no), 1);
   await guard(() => save('setlists', { ...L, set_count: Math.max(n0(L.set_count), n), break_count: L.break_count ?? F.break_count, break_min: L.break_min ?? F.break_min, plan: L.plan || F.plan }));
