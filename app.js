@@ -50,31 +50,71 @@ const api = window.__BAND_MOCK__ || {
 
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
-S._noteOpen = {};
+S._noteOpen = {}; S.offline = false;
+const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
+['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
+const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+const isNetErr = e => /failed to fetch|networkerror|load failed|network request|timeout|fetch/i.test(String((e && e.message) || e));
 
 async function loadAll() {
   const res = await Promise.all(TABLES.map(t => api.all(t).catch(e => { if (OPTIONAL.includes(t)) return []; throw e; })));
   TABLES.forEach((t, i) => S[t] = res[i]);
   S.loaded = true;
   S.me = S.members.find(m => S.session && m.user_id === S.session.user.id) || null;
+  snapSaveSoon(); setTimeout(prefetchUpcoming, 2500);
+}
+/* a copy of the data on this device, so the app can open with no signal (view only) */
+let snapTimer = null;
+function snapSaveSoon() { clearTimeout(snapTimer); snapTimer = setTimeout(snapSave, 1500); }
+async function snapSave() {
+  if (S.offline || !S.me || !S.loaded || !S.session) return;
+  const tables = {}; TABLES.forEach(t => tables[t] = S[t]);
+  await idbPut('snap', 'data', { at: Date.now(), user: { id: S.session.user.id, email: S.session.user.email }, meId: S.me.id, tables });
+}
+const snapLoad = () => idbGet('snap', 'data');
+function bootOffline(snap, msg) {
+  TABLES.forEach(t => S[t] = snap.tables[t] || []);
+  S.session = { user: snap.user, offline: true }; S.offline = true; S.loaded = true;
+  S.me = S.members.find(m => m.id === snap.meId) || null;
+  render(); if (msg) toast(msg);
+}
+async function reachable() {                                         // is Supabase actually answering?
+  try { return await Promise.race([fetch(SUPABASE_URL + '/auth/v1/health', { mode: 'no-cors', cache: 'no-store' }).then(() => true), new Promise(r => setTimeout(() => r(false), 3500))]); } catch { return false; }
+}
+async function tryOnline(quiet) {
+  if (!S.offline) return;
+  try { await timeoutP(loadAll(), 10000); S.offline = false; if (!quiet) toast('Back online'); render(); }
+  catch (e) { if (!quiet) toast('Still can’t reach the server.', true); }
+}
+let preRunning = false;
+async function prefetchUpcoming() {                                  // save charts and photos for the next two weeks of gigs while there's signal
+  if (preRunning || S.offline || !S.me) return; preRunning = true;
+  try {
+    const t = todayIso();
+    for (const g of S.gigs.filter(x => x.kind === 'gig' && x.status === 'confirmed' && x.gig_date && x.gig_date >= t && days(t, x.gig_date) <= 14)) {
+      for (const p of photosOf(g)) { try { await photoSrc(p.path); } catch {} }
+      const L = listOf(g.id); if (!L) continue;
+      for (const i of itemsOf(L.id)) { const c = i.played && chartFor(i.song_id); if (c) { try { await chartData(c.chart); } catch {} } }
+    }
+  } finally { preRunning = false; }
 }
 async function save(table, row) {
   const [saved] = await api.upsert(table, [row]);
   const keys = PK[table] || ['id'];
   const i = S[table].findIndex(r => keys.every(k => r[k] === saved[k]));
   if (i >= 0) S[table][i] = saved; else S[table].push(saved);
-  return saved;
+  snapSaveSoon(); return saved;
 }
 async function saveMany(table, rows) {
   if (!rows.length) return [];
   const saved = await api.upsert(table, rows);
   const keys = PK[table] || ['id'];
   saved.forEach(r => { const i = S[table].findIndex(x => keys.every(k => x[k] === r[k])); if (i >= 0) S[table][i] = r; else S[table].push(r); });
-  return saved;
+  snapSaveSoon(); return saved;
 }
 async function del(table, id) {
   await api.remove(table, { id });
-  S[table] = S[table].filter(r => r.id !== id);
+  S[table] = S[table].filter(r => r.id !== id); snapSaveSoon();
 }
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
 
@@ -125,8 +165,8 @@ function download(filename, data, type) {
 
 /* ============================================================ domain */
 const STATUSES = ['inquiry','quoted','confirmed','complete','passed','cancelled'];
-const STATUS_LABEL = { inquiry: 'Inquiry', quoted: 'Inquiry', confirmed: 'Booked', complete: 'Played', passed: 'Passed/Cancelled', cancelled: 'Passed/Cancelled' };
-const STATUS_PICK = [['inquiry', 'Inquiry', ['inquiry', 'quoted']], ['confirmed', 'Booked', ['confirmed']], ['complete', 'Played', ['complete']], ['passed', 'Passed/Cancelled', ['passed', 'cancelled']]];
+const STATUS_LABEL = { inquiry: 'Lead', quoted: 'Lead', confirmed: 'Booked', complete: 'Played', passed: 'Passed/Cancelled', cancelled: 'Passed/Cancelled' };
+const STATUS_PICK = [['inquiry', 'Lead', ['inquiry', 'quoted']], ['confirmed', 'Booked', ['confirmed']], ['complete', 'Played', ['complete']], ['passed', 'Passed/Cancelled', ['passed', 'cancelled']]];
 const isGig = g => g.kind === 'gig';
 const live = g => isGig(g) && !['passed','cancelled'].includes(g.status);
 const salesFor = id => S.merch_sales.filter(s => s.gig_id === id).reduce((a, s) => a + n0(s.amount), 0);
@@ -181,7 +221,7 @@ function attention() {
     if (['confirmed'].includes(g.status) && d && d >= t && days(t, d) <= (st.remind_setlist_days || 14) && !setItems(g.id).length) add(days(t, d) <= 5 ? 'hi' : 'md', g, `Gig in ${days(t, d)} days and no setlist yet.`, 'Build set');
     if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 21 && (!g.start_time || !g.venue || /tbd/i.test(g.venue || ''))) add('md', g, 'Missing start time or venue — lock in details with the client.', 'Details');
     if (g.status === 'confirmed' && !d) add('md', g, 'Booked but no date set.', 'Details');
-    if (g.status === 'inquiry' && !g.quote) add('md', g, 'New inquiry — send a quote.', 'Quote');
+    if (g.status === 'inquiry' && !g.quote) add('md', g, 'New lead — send a quote.', 'Quote');
     if (g.status === 'quoted' && g.quoted_on && days(g.quoted_on, t) >= (st.remind_quote_days || 10)) add('md', g, `Quote sent ${days(g.quoted_on, t)} days ago with no answer — follow up.`, 'Follow up');
     if (g.status === 'quoted' && d && d < t) add('lo', g, 'Quoted date has passed — mark it passed or update the date.', 'Update');
   });
@@ -225,6 +265,7 @@ function shell(route, inner) {
       <a class="who" href="#settings" style="text-decoration:none" title="Band & settings">${me ? `<img src="${photo(me)}" alt=""><span class="nm small muted">${esc(me.name)}</span>` : ''}</a>
     </div>
   </header>
+  ${S.offline ? '<div class="offline-bar"><span>Offline — showing the data saved on this device. View only.</span><button class="btn sm" data-act="go-online">Retry</button></div>' : ''}
   <div class="scroll"><main class="view">${inner}</main></div>
   <nav class="tabbar">${NAV.filter(n => n[0] !== 'settings').map(([k, l, i]) => `<a href="#${k}" class="${on(k)}">${ICON[i]}${l}</a>`).join('')}</nav>`;
 }
@@ -239,7 +280,7 @@ try { Object.assign(UI, JSON.parse(localStorage.getItem('tfhq-ui') || '{}')); } 
 const keepUI = () => { try { localStorage.setItem('tfhq-ui', JSON.stringify(UI)); } catch {} };
 
 function render() {
-  document.body.classList.toggle('cb', !!UI.cb);
+  document.body.classList.toggle('cb', !!UI.cb); document.body.classList.toggle('offline', !!S.offline);
   document.body.style.setProperty('--tz', UI.tz != null ? UI.tz : (window.innerWidth >= 700 ? 1.12 : 1));
   const app = $('#app');
   if (!S.session) return app.innerHTML = loginView();
@@ -395,7 +436,12 @@ function gigHead(g) {
 /* ---- gig photos (load-in map, stage plot…) ---- */
 const photosOf = g => Array.isArray(g.photos) ? g.photos : [];
 const photoCache = {};
-async function photoSrc(path) { const c = photoCache[path]; if (c && c.exp > Date.now()) return c.url; const url = await api.photoUrl(path); photoCache[path] = { url, exp: Date.now() + 50 * 60e3 }; return url; }
+async function photoSrc(path) {
+  const c = photoCache[path]; if (c) return c;
+  let rec = await idbGet('photo', path);
+  if (!rec) { const url = await api.photoUrl(path); try { const r = await fetch(url); rec = { type: r.headers.get('content-type') || 'image/jpeg', buf: await r.arrayBuffer() }; idbPut('photo', path, rec); } catch { return url; } }
+  return photoCache[path] = URL.createObjectURL(new Blob([rec.buf], { type: rec.type }));
+}
 function hydratePhotos() { $$('img[data-ph]').forEach(async img => { if (img.getAttribute('src')) return; try { img.src = await photoSrc(img.dataset.ph); } catch { img.alt = 'Photo unavailable'; } }); }
 function downscale(file, max = 1800) {
   return new Promise((res, rej) => {
@@ -791,7 +837,7 @@ function setlistEdit(id) {
             <button class="ib" title="${i.played ? 'Mark skipped' : 'Mark played'}" data-act="si-played" data-id="${i.id}">${i.played ? '✓' : '○'}</button>
             <button class="ib" title="Note after this song (announcement, swap…)" data-act="si-note" data-id="${i.id}" style="${i.note ? 'color:var(--gold)' : ''}">✎</button>
             <button class="ib" title="Remove" data-act="si-del" data-id="${i.id}">✕</button>
-          </div></div>${i.note || S._noteOpen[i.id] ? `<div class="snote-edit"><input class="in" data-si-note="${i.id}" value="${esc(i.note || '')}" placeholder="Between songs — announcement, instrument swap, story…"></div>` : ''}`; }).join('') || '<p class="small muted">Click songs in the book to add them here, or let the optimizer build it.</p>'}
+          </div></div>${i.note || S._noteOpen[i.id] ? `<div class="snote-edit" data-stop><textarea class="in" rows="2" data-si-note="${i.id}" placeholder="Between songs — announcement, instrument swap, story…">${esc(i.note || '')}</textarea></div>` : ''}`; }).join('') || '<p class="small muted">Click songs in the book to add them here, or let the optimizer build it.</p>'}
       ${brk && brk.kind === 'break' ? `<div class="small muted" style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">Break · ${brk.dur} min${brk.from ? ` · ${brk.from}–${brk.to}` : ''}</div>` : ''}
     </section>`;
   }).join('');
@@ -838,7 +884,6 @@ function setlistEdit(id) {
   </section>
   <div class="row" style="margin-bottom:14px">
     <select class="in" id="copyFrom" style="width:auto;max-width:260px"><option value="">Copy from another setlist…</option>${others.map(o => { const og = gigOf(o); return `<option value="${o.id}">${esc(slName(o))}${og && og.gig_date ? ' (' + mdY(og.gig_date) + ')' : ' (draft)'}</option>`; }).join('')}</select>
-    <button class="btn sm" data-act="set-default">Fill from default order</button>
     <span class="spacer"></span>
     <button class="btn sm gold" data-act="set-pdf">Stage PDF</button><button class="btn sm" data-act="set-text">Copy as text</button>
     <span id="clearWrap"><button class="btn sm danger" data-act="set-clear-ask">Clear</button></span>
@@ -860,7 +905,7 @@ function setlistEdit(id) {
 const OPT_DEFAULT = { pools: { active: true, bench: false, learning: false, holiday: false }, shape: 'build', keepPinned: true,
   encore: 1, w: { energy: 2, inst: 2, tuning: 3, key: 1, vox: 1, genre: 1, rating: 2, fresh: 1, oc: 2 } };
 const SHAPES = { build: 'Start easy, finish big', party: 'High energy all night', dinner: 'Dinner first, then dance', waves: 'Each set builds' };
-const WLAB = { energy: 'Energy arc', inst: 'Fewer instrument swaps', tuning: 'Group tunings (retune only at breaks)', key: 'Vary keys back-to-back', vox: 'Mix lead singers', genre: 'Spread genres', rating: 'Favor top-rated songs', fresh: 'Rest songs from the last gig', oc: 'Open and close sets with flagged songs' };
+const WLAB = { energy: 'Energy arc', inst: 'Fewer instrument swaps', tuning: 'Group tunings (retune only at breaks)', key: 'Vary keys back-to-back', vox: 'Mix lead singers', genre: 'Spread genres', rating: 'Favor top-rated songs', fresh: 'Rest songs from the last gig', oc: 'Use the good openers & closers' };
 function optPrefs(g) {
   const p = JSON.parse(JSON.stringify(OPT_DEFAULT)); const saved = (g.plan && g.plan.opt) || {};   // g: slCtx()
   Object.assign(p.pools, saved.pools || {}); Object.assign(p.w, saved.w || {}); if (saved.shape) p.shape = saved.shape; if (saved.keepPinned != null) p.keepPinned = saved.keepPinned; if (saved.encore != null) p.encore = saved.encore;
@@ -1041,7 +1086,8 @@ const starsRO = v => [1, 2, 3, 4, 5].map(i => `<button tabindex="-1" class="${v 
 /* ============================================================ songs */
 function songsView() {
   const stats = songStats(), q = UI.songSearch.toLowerCase(), f = UI.songFilter;
-  let rows = S.songs.filter(s => (f === 'all' || s.status === f) && (!q || [s.title, s.artist, s.lead_vox, s.starter, s.genre].join(' ').toLowerCase().includes(q)));
+  const sm = /^([bm])([\d.]+)$/.exec(UI.songStars || ''), starOk = s => !sm || (sm[1] === 'b' ? avgRating(s.id) : myRating(s.id)) >= parseFloat(sm[2]);
+  let rows = S.songs.filter(s => (f === 'all' || s.status === f) && (!q || [s.title, s.artist, s.lead_vox, s.starter, s.genre].join(' ').toLowerCase().includes(q)) && (!UI.songNoChart || !chartFor(s.id)) && (!UI.songFlag || s['is_' + UI.songFlag]) && starOk(s));
   const key = UI.songSort, dir = UI.songSortDir === 'desc' ? -1 : 1;
   const val = s => ({ title: s.title, artist: s.artist || '', key: s.song_key || '', length: n0(s.length_min), bpm: n0(s.bpm), lead: s.lead_vox || '', mine: myRating(s.id), avg: avgRating(s.id) || 0, genre: (s.genre || '') + (9 - n0(s.energy)), plays: (stats[s.id] || {}).plays || 0, last: (stats[s.id] || {}).last || '', year: s.year || 0 }[key]);
   rows.sort((a, b) => { const x = val(a), y = val(b); return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * dir; });
@@ -1052,6 +1098,12 @@ function songsView() {
   <div class="row" style="margin-bottom:14px">
     <div class="chips">${[['active','Active'],['learning','Learning'],['bench','Bench'],['holiday','Holiday'],['retired','Retired'],['all','All']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-act="song-filter" data-v="${k}">${l}${k !== 'all' ? ' ' + counts[k] : ''}</button>`).join('')}</div>
     <span class="spacer"></span><input class="in" id="songSearch" placeholder="Search title, artist, singer" value="${esc(UI.songSearch)}" style="width:220px"><label class="btn" style="cursor:pointer">Import charts<input type="file" accept="application/pdf" multiple hidden data-chart-import></label><button class="btn gold" data-act="song-new">+ Song</button>
+  </div>
+  <div class="row" style="margin:-4px 0 14px;gap:8px;flex-wrap:wrap">
+    <button class="chip ${UI.songNoChart ? 'on' : ''}" data-act="song-nochart">No chart for me</button>
+    ${[['opener', 'Good openers'], ['closer', 'Good closers'], ['encore', 'Good encores']].map(([k, l]) => `<button class="chip ${UI.songFlag === k ? 'on' : ''}" data-act="song-flag" data-v="${k}">${l}</button>`).join('')}
+    <select class="in" data-song-stars style="width:auto;padding:5px 10px;font-size:13px"><option value="">Any rating</option>${[['b3', 'Band avg ★ 3+'], ['b3.5', 'Band avg ★ 3.5+'], ['b4', 'Band avg ★ 4+'], ['b4.5', 'Band avg ★ 4.5+'], ['m3', 'My stars ★ 3+'], ['m4', 'My stars ★ 4+'], ['m5', 'My stars ★ 5']].map(([v, l]) => `<option value="${v}" ${UI.songStars === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <span class="small muted">${rows.length} song${rows.length === 1 ? '' : 's'}</span>
   </div>
   <section class="panel"><div class="tbl-wrap"><table class="tbl">
     <thead><tr>${th('title', 'Song')}${th('key', 'Key')}${th('length', 'Len', 'r')}${th('bpm', 'BPM', 'r hide-sm')}${th('lead', 'Lead vox', 'hide-sm')}${th('genre', 'Genre', 'hide-sm')}${th('mine', 'Your rating')}${th('avg', 'Band', 'hide-sm')}${th('plays', 'Plays', 'r')}${th('last', 'Last played', 'hide-sm')}</tr></thead>
@@ -1082,18 +1134,16 @@ function songModal(s) {
       <label class="f w2">Genre<input class="in" data-s="genre" list="genreList" value="${esc(s.genre || '')}"><datalist id="genreList">${[...new Set(S.songs.map(x => x.genre).filter(Boolean))].sort().map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
       <label class="f">Energy (1–5)<select class="in" data-s="energy"><option value="">—</option>${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${s.energy === n ? 'selected' : ''}>${n} ${['', 'mellow', 'easy', 'groove', 'lively', 'barn-burner'][n]}</option>`).join('')}</select></label>
       <label class="f">Tuning<select class="in" data-s="tuning">${['Standard', 'Half step down', 'Drop D', 'Other'].map(x => `<option ${(s.tuning || 'Standard') === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
-      <label class="f">Opener?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_opener" ${s.is_opener ? 'checked' : ''}> Opens a set</span></label>
-      <label class="f">Closer?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_closer" ${s.is_closer ? 'checked' : ''}> Closes a set</span></label>
-      <label class="f">Encore?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_encore" ${s.is_encore ? 'checked' : ''}> After the last set</span></label>
-      ${f('year', 'Year', 'number')}${f('added_on', 'Learned', 'date')}${f('default_set', 'Default set', 'number')}${f('default_order', 'Default order', 'number')}
-      ${f('chart_url', 'Chart link (PDF / Drive)', 'url', 'w4')}
+      <label class="f">Good opener?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_opener" ${s.is_opener ? 'checked' : ''}> Works to open a set</span></label>
+      <label class="f">Good closer?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_closer" ${s.is_closer ? 'checked' : ''}> Works to close a set</span></label>
+      <label class="f">Good encore?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_encore" ${s.is_encore ? 'checked' : ''}> Works as an encore</span></label>
+      ${f('year', 'Year', 'number')}${f('added_on', 'Learned', 'date')}
       <label class="f w4">Notes<input class="in" data-s="comment" value="${esc(s.comment || '')}" placeholder="e.g. tuning half step down"></label>
     </div>
     ${s.id ? `<h2 class="sec" style="margin-top:18px">Charts (PDF)</h2>${chartBox(s)}` : ''}
     <h2 class="sec" style="margin-top:18px">Who plays what</h2>
     <div class="fgrid">${ms.map(m => `<label class="f">${esc(m.name)}<input class="in" data-part="${esc(m.name)}" value="${esc(p[m.name] || '')}"></label>`).join('')}</div>
     ${s.id ? `<h2 class="sec" style="margin-top:18px">Band ratings</h2><div class="row small">${ms.map(m => { const r = S.song_ratings.find(x => x.song_id === s.id && x.member_id === m.id); return `<span>${esc(m.name)} <span class="stars ro">${starsRO(r && r.rating)}</span></span>`; }).join('')}</div>` : ''}
-    ${s.chart_url ? `<p><a href="${esc(s.chart_url)}" target="_blank" rel="noopener">Open chart ↗</a></p>` : ''}
     <div class="row" style="margin-top:18px"><button class="btn gold" data-act="song-save" data-id="${s.id || ''}">Save song</button><span class="spacer"></span>${s.id ? `<span id="songDelWrap"><button class="btn danger sm" data-act="song-del-ask">Delete</button></span>` : ''}</div>
   </div></div>`;
 }
@@ -1158,7 +1208,7 @@ function moneyView() {
   <div class="split">
     <div class="stack">
       <section class="panel"><div class="row"><h2 class="sec" style="margin:0">Income by year</h2><span class="spacer"></span>
-        <div class="legend"><span><i style="background:var(--gold)"></i>Gig pay</span><span><i style="background:#c27b1a"></i>Tips</span><span><i style="background:#f3eee4"></i>Merch</span></div></div>
+        <div class="legend"><span><i style="background:var(--gold)"></i>Income — pay, tips &amp; merch (left)</span><span><i style="background:#8fb8e8"></i>Gigs played (right)</span></div></div>
         ${yearChart(byYear)}</section>
       <section class="panel"><h2 class="sec">Gigs ${yrSel === 'all' ? '' : yrSel}</h2><div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Date</th><th>Gig</th><th class="r">Pay</th><th class="r">Tips</th><th class="r">Merch</th><th class="r">Total</th><th class="r hide-sm">$/hr</th><th class="r hide-sm">Each</th></tr></thead>
@@ -1184,19 +1234,23 @@ function moneyView() {
 }
 function yearChart(data) {
   if (!data.length) return '<div class="empty">No played gigs yet.</div>';
-  const W = 640, H = 230, pl = 52, pb = 26, pt = 18, pr = 8;
-  const max = Math.max(...data.map(d => d.pay + d.tips + d.merch)) || 1;
-  const step = Math.pow(10, Math.floor(Math.log10(max))) * (max / Math.pow(10, Math.floor(Math.log10(max))) > 5 ? 2 : max / Math.pow(10, Math.floor(Math.log10(max))) > 2 ? 1 : .5);
-  const top = Math.ceil(max / step) * step;
-  const y = v => pt + (H - pt - pb) * (1 - v / top);
-  const bw = Math.min(70, (W - pl - pr) / data.length * .55);
-  const x = i => pl + (W - pl - pr) * (i + .5) / data.length;
-  let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:10px" role="img" aria-label="Income by year">`;
-  for (let v = 0; v <= top + 1e-6; v += step) s += `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(243,238,228,.08)"/><text x="${pl - 8}" y="${y(v) + 4}" text-anchor="end">$${v >= 1000 ? (v / 1000) + 'k' : v}</text>`;
+  const inc = d => d.pay + d.tips + d.merch, BLUE = '#8fb8e8';
+  const nice = m => { const e = Math.pow(10, Math.floor(Math.log10(m || 1))), f = m / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 4 ? 4 : f <= 5 ? 5 : 10) * e; };
+  const topI = nice(Math.max(...data.map(inc), 1)), topN = Math.max(4, Math.ceil(Math.max(...data.map(d => d.n), 1) / 4) * 4);
+  const W = 640, H = 270, pl = 58, pr = 40, pt = 22, pb = 30, n = data.length;
+  const x = i => pl + (W - pl - pr) * (i + .5) / n, yI = v => pt + (H - pt - pb) * (1 - v / topI), yN = v => pt + (H - pt - pb) * (1 - v / topN);
+  let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:10px" role="img" aria-label="Income and gig count by year">`;
+  for (let k = 0; k <= 4; k++) { const y = pt + (H - pt - pb) * (1 - k / 4);
+    s += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="rgba(243,238,228,.08)"/><text x="${pl - 7}" y="${y + 4}" text-anchor="end" style="fill:var(--gold)">${money(topI * k / 4, true)}</text><text x="${W - pr + 7}" y="${y + 4}" style="fill:${BLUE}">${+(topN * k / 4).toFixed(1)}</text>`; }
+  s += `<text x="${pl - 7}" y="10" text-anchor="end" style="fill:var(--gold);font-weight:700">Income</text><text x="${W - pr + 7}" y="10" style="fill:${BLUE};font-weight:700">Gigs</text>`;
+  data.forEach((d, i) => { s += `<text x="${x(i)}" y="${H - 9}" text-anchor="middle">${d.y}</text>`; });
+  const line = (f, c, dash) => `<polyline points="${data.map((d, i) => x(i).toFixed(1) + ',' + f(d).toFixed(1)).join(' ')}" fill="none" stroke="${c}" stroke-width="3" stroke-linejoin="round" ${dash ? 'stroke-dasharray="7 5"' : ''}/>`;
+  s += line(d => yI(inc(d)), 'var(--gold)') + line(d => yN(d.n), BLUE, true);
   data.forEach((d, i) => {
-    let base = 0; const cx = x(i);
-    [['pay', '#ffbf43'], ['tips', '#c27b1a'], ['merch', '#f3eee4']].forEach(([k, c]) => { if (d[k] > 0) { s += `<rect x="${cx - bw / 2}" width="${bw}" y="${y(base + d[k])}" height="${y(base) - y(base + d[k])}" fill="${c}"><title>${d.y} ${k}: ${money(d[k])}</title></rect>`; base += d[k]; } });
-    s += `<text x="${cx}" y="${y(base) - 6}" text-anchor="middle" style="fill:var(--cream);font-weight:700">${money(base)}</text><text x="${cx}" y="${H - 8}" text-anchor="middle">${d.y} · ${d.n} gigs</text>`;
+    const yi = yI(inc(d)), yn = yN(d.n), nAbove = yn < yi, bottom = H - pb - 8;      // labels point away from each other; at an edge they slide to the side
+    const lab = (cx, cy, dy, txt, c) => { const yy = cy + dy; return (yy > bottom || yy < pt + 4) ? `<text x="${cx + 11}" y="${cy + 4}" text-anchor="start" style="fill:${c};font-weight:700">${txt}</text>` : `<text x="${cx}" y="${yy}" text-anchor="middle" style="fill:${c};font-weight:700">${txt}</text>`; };
+    s += `<circle cx="${x(i)}" cy="${yi}" r="5" fill="var(--gold)"><title>${d.y}: ${money(inc(d))} from ${d.n} gigs</title></circle>${lab(x(i), yi, nAbove ? 21 : -10, money(inc(d), true), 'var(--gold)')}`;
+    s += `<rect x="${x(i) - 5}" y="${yn - 5}" width="10" height="10" fill="${BLUE}"><title>${d.y}: ${d.n} gigs</title></rect>${lab(x(i), yn, nAbove ? -10 : 21, d.n, BLUE)}`;
   });
   return s + '</svg>';
 }
@@ -1487,9 +1541,11 @@ function chartFor(songId, memberId = S.me && S.me.id) {          // which PDF th
   return null;
 }
 /* PDFs are kept on the device after the first open, so a weak venue connection can't take the charts away */
-const chartDB = () => new Promise((res, rej) => { const r = indexedDB.open('tfhq-charts', 1); r.onupgradeneeded = () => r.result.createObjectStore('pdf'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-async function cacheGet(key) { try { const db = await chartDB(); return await new Promise(res => { const q = db.transaction('pdf').objectStore('pdf').get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch { return null; } }
-async function cachePut(key, buf) { try { const db = await chartDB(); await new Promise(res => { const tx = db.transaction('pdf', 'readwrite'); tx.objectStore('pdf').put(buf, key); tx.oncomplete = tx.onerror = tx.onabort = () => res(); }); } catch {} }
+const idb = () => new Promise((res, rej) => { const r = indexedDB.open('tfhq-charts', 2); r.onupgradeneeded = () => { const db = r.result; ['pdf', 'photo', 'snap'].forEach(n => { if (!db.objectStoreNames.contains(n)) db.createObjectStore(n); }); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+async function idbGet(store, key) { try { const db = await idb(); return await new Promise(res => { const q = db.transaction(store).objectStore(store).get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch { return null; } }
+async function idbPut(store, key, val) { try { const db = await idb(); await new Promise(res => { const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).put(val, key); tx.oncomplete = tx.onerror = tx.onabort = () => res(); }); } catch {} }
+async function idbClear() { try { const db = await idb(); await Promise.all(['pdf', 'photo', 'snap'].map(s => new Promise(res => { const tx = db.transaction(s, 'readwrite'); tx.objectStore(s).clear(); tx.oncomplete = tx.onerror = tx.onabort = () => res(); }))); } catch {} }
+const cacheGet = key => idbGet('pdf', key), cachePut = (key, buf) => idbPut('pdf', key, buf);
 async function chartData(c) {
   const key = `${c.path}|${c.updated_at || c.created_at || ''}`;
   let buf = await cacheGet(key); if (buf) return buf;
@@ -1552,6 +1608,28 @@ function importModal() {
     <div class="row" style="margin-top:14px"><button class="btn gold" data-act="chart-import-go" ${n ? '' : 'disabled'}>Upload ${n} chart${n === 1 ? '' : 's'}</button><span class="small faint" id="impStatus"></span></div></div></div>`;
 }
 
+/* ============================================================ refresh */
+const fingerprint = () => JSON.stringify(TABLES.map(t => S[t]));
+async function refreshNow(manual) {
+  if (S.offline) return tryOnline(!manual);
+  if (S.dirty) { if (manual) toast('Save or cancel your changes first, then refresh.', true); return; }
+  try { const before = fingerprint(); await timeoutP(loadAll(), 12000); if (manual || fingerprint() !== before) render(); if (manual) toast('Up to date'); }
+  catch (e) { if (manual) toast(isNetErr(e) ? 'Couldn’t refresh — no connection.' : (e.message || 'Couldn’t refresh'), true); }
+}
+(function pullToRefresh() {
+  let y0 = null, dy = 0, pill = null;
+  const hdr = () => { const h = $('.top'); return (h ? h.getBoundingClientRect().bottom : 60) + 8; };
+  const show = (txt) => { if (!pill) { pill = document.createElement('div'); pill.className = 'ptr'; document.body.appendChild(pill); } pill.style.top = hdr() + 'px'; pill.textContent = txt; pill.style.opacity = Math.min(1, dy / 50); };
+  const hide = () => { if (pill) { pill.remove(); pill = null; } };
+  document.addEventListener('touchstart', e => { const sc = $('.scroll'); y0 = (sc && sc.contains(e.target) && sc.scrollTop <= 0 && e.touches.length === 1 && !GM.open && !$('#modalRoot .modal') && !e.target.closest('.up-scroll,.tbl-wrap,textarea')) ? e.touches[0].clientY : null; dy = 0; }, { passive: true });
+  document.addEventListener('touchmove', e => { if (y0 == null) return; dy = e.touches[0].clientY - y0; const sc = $('.scroll'); if (dy > 8 && sc && sc.scrollTop <= 0) show(dy > 80 ? 'Release to refresh' : '↓ Pull to refresh'); else if (dy <= 8) hide(); }, { passive: true });
+  document.addEventListener('touchend', async () => { const go = y0 != null && dy > 80; y0 = null; if (!go) return hide(); if (pill) pill.textContent = 'Refreshing…'; await refreshNow(true); hide(); });
+  setInterval(() => {                                               // every 90 s while you're just looking, never while typing
+    const a = document.activeElement, typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+    if (document.visibilityState === 'visible' && S.me && !S.offline && !S.dirty && !typing && !GM.open && !$('#modalRoot .modal')) refreshNow(false);
+  }, 90000);
+})();
+
 /* ============================================================ gig mode */
 const GM = { open: false, seq: [], i: 0, zoom: 1, tok: 0, lid: null, preview: false, lock: null, awake: false, doc: null, drawer: false };
 const GM_ZOOM = [1, 1.25, 1.5, 2, 2.5, 3];
@@ -1597,7 +1675,7 @@ function gmClick(e) {
 function gmDrawer() {
   const dr = $('#gmDrawer'); if (!dr) return; dr.hidden = !GM.drawer; if (!GM.drawer) return;
   let last = null;
-  dr.innerHTML = `<div class="row" style="padding:12px"><b style="font-size:18px">Songs</b><span class="spacer"></span><button class="gm-btn" data-gm="list">✕</button></div>` + GM.seq.map((x, k) => { const h = x.set !== last ? `<div class="gm-dh">Set ${x.set}</div>` : ''; last = x.set; const s = x.song || {}; return `${h}<button class="gm-di ${k === GM.i ? 'on' : ''}" data-gm="go" data-i="${k}"><span class="n">${k + 1}</span><span class="grow">${esc(s.title || '?')}</span><span class="small">${esc(songLabel(s))}${chartFor(s.id) || x.forceChart ? '' : ' · no chart'}</span></button>`; }).join('');
+  dr.innerHTML = `<div class="row" style="padding:12px"><b style="font-size:18px">Songs</b><span class="spacer"></span><button class="gm-btn" data-gm="list">✕</button></div>` + GM.seq.map((x, k) => { const h = x.set !== last ? `<div class="gm-dh">Set ${x.set}</div>` : ''; last = x.set; const s = x.song || {}; return `${h}<button class="gm-di ${k === GM.i ? 'on' : ''}" data-gm="go" data-i="${k}"><span class="n">${k + 1}</span><span class="grow">${esc(s.title || '?')}</span><span class="small">${esc(songLabel(s))}${chartFor(s.id) || x.forceChart ? '' : ' · no chart'}</span></button>${x.item && x.item.note ? `<div class="gm-dn">${esc(x.item.note)}</div>` : ''}`; }).join('');
 }
 function gmShow(i) {
   if (i < 0 || i >= GM.seq.length) return;
@@ -1619,10 +1697,9 @@ function gmBottom() {
     const alerts = brk ? [] : [...(c.tuning ? [`retune → ${esc(ns.tuning || 'Standard')}`] : []), ...c.inst.map(x => `${esc(x.who)}: ${esc(x.to)}`)];
     next = `<div class="gm-next"><span class="gm-lbl">${brk ? 'NEXT SET' : 'NEXT'}</span> <b>${esc(ns.title || '')}</b> <span class="gm-bits">${bits.join(' · ')}</span></div>${alerts.length ? `<div class="gm-alert">⇄ ${alerts.join(' · ')}</div>` : ''}`;
   }
-  const notes = GM.seq.map((x, k) => ({ x, k })).filter(o => o.x.set === cur.set && o.x.item && o.x.item.note);
   return `<div class="gm-nav"><button class="gm-nb" data-gm="prev" ${GM.i ? '' : 'disabled'} aria-label="Previous song">◀</button>
-    <div class="gm-info">${s.bpm || s.song_key ? `<div class="gm-now"><span class="gm-lbl">NOW</span> ${s.bpm ? `♩ <b>${s.bpm}</b> BPM` : ''}${s.bpm && s.song_key ? ' · ' : ''}${s.song_key ? 'Key ' + esc(s.song_key) + (s.capo ? ' · capo ' + s.capo : '') : ''}</div>` : ''}${say ? `<div class="gm-say"><span class="gm-lbl">SAY</span> ${esc(say)}</div>` : ''}${next}
-      ${notes.length ? `<div class="gm-notes"><span class="gm-lbl">NOTES · SET ${cur.set}</span>${notes.map(o => `<div class="${o.k < GM.i ? 'past' : o.k === GM.i ? 'now' : ''}">after <b>${esc((o.x.song || {}).title || '')}</b>: ${esc(o.x.item.note)}</div>`).join('')}</div>` : ''}</div>
+    <div class="gm-info">${s.bpm || s.song_key ? `<div class="gm-now"><span class="gm-lbl">NOW</span> ${s.bpm ? `♩ <b>${s.bpm}</b> BPM` : ''}${s.bpm && s.song_key ? ' · ' : ''}${s.song_key ? 'Key ' + esc(s.song_key) + (s.capo ? ' · capo ' + s.capo : '') : ''}</div>` : ''}${say ? `<div class="gm-say">${esc(say)}</div>` : ''}${next}
+</div>
     <button class="gm-nb" data-gm="next" ${nxt ? '' : 'disabled'} aria-label="Next song">▶</button></div>`;
 }
 function gmNoChart(cur) {
@@ -1700,6 +1777,8 @@ document.addEventListener('change', async e => {
   } else if (t.matches('[data-imp]')) {
     S._imp.rows[Number(t.dataset.imp)].songId = t.value; const n = S._imp.rows.filter(r => r.songId).length, b = $('[data-act="chart-import-go"]');
     if (b) { b.textContent = `Upload ${n} chart${n === 1 ? '' : 's'}`; b.disabled = !n; }
+  } else if (t.matches('[data-song-stars]')) {
+    UI.songStars = t.value; keepUI(); render();
   } else if (t.matches('[data-text-size]')) {
     UI.tz = t.value === 'auto' ? null : Number(t.value); keepUI(); render();
   } else if (t.matches('[data-chart-default]')) {
@@ -1718,6 +1797,7 @@ document.addEventListener('submit', async e => {
 document.addEventListener('click', async e => {
   const hrefRow = e.target.closest('tr[data-href]'); if (hrefRow && !e.target.closest('a,button')) { location.hash = hrefRow.dataset.href; return; }
   const el = e.target.closest('[data-act]'); if (!el) return;
+  const fc = e.target.closest('input,textarea,select'); if (fc && fc !== el) return;                       // typing in a field never fires the card around it
   if (el.closest('[data-stop]') && el.dataset.act === 'modal-close' && el.classList.contains('scrim')) return;
   if (el.classList.contains('scrim') && e.target !== el) return;
   const act = el.dataset.act, v = el.dataset.v, id = el.dataset.id;
@@ -1732,10 +1812,13 @@ document.addEventListener('click', async e => {
 const ACTIONS = {
   magic: async () => { const em = $('#lgEmail').value.trim(); const msg = $('#lgMsg'); if (!em) { msg.textContent = 'Enter your email first.'; return; } try { await api.magic(em); msg.style.color = 'var(--ok)'; msg.textContent = 'Check your email for a sign-in link.'; } catch (err) { msg.textContent = err.message; } },
   reload: () => location.reload(),
-  signout: async () => { await api.signOut(); },
+  signout: async () => { await idbClear(); await api.signOut(); },
+  'go-online': () => tryOnline(false),
   'modal-close': () => closeModal(),
   'gig-filter': ({ v }) => { UI.gigFilter = v; keepUI(); render(); },
   'song-sort': ({ v }) => { if (UI.songSort === v) UI.songSortDir = UI.songSortDir === 'desc' ? 'asc' : 'desc'; else { UI.songSort = v; UI.songSortDir = ['length', 'mine', 'avg', 'plays', 'last', 'year'].includes(v) ? 'desc' : 'asc'; } keepUI(); render(); },
+  'song-nochart': () => { UI.songNoChart = !UI.songNoChart; keepUI(); render(); },
+  'song-flag': ({ v }) => { UI.songFlag = UI.songFlag === v ? '' : v; keepUI(); render(); },
   'song-filter': ({ v }) => { UI.songFilter = v; keepUI(); render(); },
   'lib-filter': ({ v }) => { UI.libFilter = v; render(); },
   'money-year': ({ v }) => { UI.moneyYear = v; keepUI(); render(); },
@@ -1767,7 +1850,7 @@ const ACTIONS = {
     const cur = byId('gigs', g.id); const tile = el.closest('.ph');
     if (await guard(() => save('gigs', { ...cur, photos: photosOf(cur).filter(p => p.path !== path) }), 'Photo removed') && tile) tile.remove();
   },
-  'si-note': ({ id }) => { S._noteOpen[id] = !S._noteOpen[id]; render(); const el = $(`[data-si-note="${id}"]`); if (el) el.focus(); },
+  'si-note': ({ id }) => { S._noteOpen[id] = true; render(); const el = $(`[data-si-note="${id}"]`); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } },
   'pl-export': ({ g }) => { const L = g && byId('setlists', g.id); if (L) openModal(exportModal(L)); },
   'exp-copy': ({ id }) => { const L = byId('setlists', id); if (L) copy(exportText(exportRows(L))); },
   'exp-csv': ({ id }) => { const L = byId('setlists', id); if (L) download(`Playlist - ${slName(L)}.csv`, exportCsv(exportRows(L)), 'text/csv'); },
@@ -1966,11 +2049,13 @@ async function boot(session) {
   S.session = session; S.loaded = false;
   if (!session) return render();
   render();
+  const snap = await snapLoad();
   try {
     await api.rpc('claim_membership');
-    await loadAll();
+    await (snap ? timeoutP(loadAll(), 10000) : loadAll());
   } catch (e) {
     console.error(e);
+    if (snap && snap.user.id === session.user.id && isNetErr(e)) return bootOffline(snap, 'Couldn’t reach the server — showing the data saved on this device (view only).');
     $('#app').innerHTML = shell('home', `${title('Can’t reach the band book')}<div class="panel"><p>${esc(e.message || e)}</p><p class="small muted">If this says the schema must be one of the exposed schemas, add <b>band</b> under Supabase → Project Settings → Data API → Exposed schemas.</p><button class="btn gold" data-act="reload">Try again</button> <button class="btn" data-act="signout">Sign out</button></div>`);
     return;
   }
@@ -1981,8 +2066,18 @@ async function boot(session) {
   // a fresh open always lands on Home — but keep deep links (calendar invites) and sign-in links
   { const h = (location.hash || '').slice(1); if (h && !/^(gig|setlist)\//.test(h) && !/access_token|refresh_token|error|type=/.test(h)) history.replaceState(null, '', location.pathname + location.search + '#home'); }
   let first = true;
-  api.onAuth(s => { if (first) return; if ((s && s.user.id) !== (S.session && S.session.user.id)) boot(s); });
-  const s = await api.session(); first = false; boot(s);
+  if ('serviceWorker' in navigator && !window.__BAND_MOCK__) navigator.serviceWorker.register('sw.js').catch(() => {});
+  api.onAuth(s => { if (first) return; if (S.offline && !s) return; if ((s && s.user.id) !== (S.session && S.session.user.id)) boot(s); });
+  let s = null, netErr = false;
+  try { s = await timeoutP(api.session(), 6000); } catch { netErr = true; }
+  first = false;
+  if (!s) {                                                          // no usable login: genuinely signed out, or just no signal?
+    const snap = await snapLoad();
+    if (snap && (netErr || navigator.onLine === false || !(await reachable()))) return bootOffline(snap);
+  }
+  boot(s);
+  window.addEventListener('online', () => tryOnline(false));
+  window.addEventListener('offline', () => { if (!S.loaded || !S.me) return; S.offline = true; if (S.dirty) toast('You’re offline — your changes can’t be saved until you reconnect.', true); else render(); });
   // refresh when someone comes back to the tab, so bandmates' edits show up
-  document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'visible' && S.me && !S.dirty && !$('#modalRoot')) { try { await loadAll(); render(); } catch {} } });
+  document.addEventListener('visibilitychange', async () => { if (document.visibilityState !== 'visible' || !S.me) return; if (S.offline) return tryOnline(true); if (!$('#modalRoot') && !GM.open) refreshNow(false); });
 })();
