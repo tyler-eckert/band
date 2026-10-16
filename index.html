@@ -38,7 +38,10 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%}
+html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
+/* app shell: header and tab bar never move; only .scroll scrolls (stops iOS toolbar collapse from shifting the footer) */
+#app{position:fixed;inset:0;display:flex;flex-direction:column;overflow-y:auto}
+.scroll{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
 body{
   background:radial-gradient(120% 80% at 85% 0%, #2c1d03 0%, var(--ink-1) 45%, var(--ink-0) 100%) fixed var(--ink-0);
   color:var(--cream);font:14px/1.5 var(--body);
@@ -60,12 +63,12 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
 
 /* ---------- top bar (press kit nav) ---------- */
-.top{position:sticky;top:0;z-index:20;display:flex;align-items:stretch;justify-content:space-between;gap:12px;
+.top{position:relative;flex:none;z-index:20;display:flex;align-items:stretch;justify-content:space-between;gap:12px;
   padding:0 max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left));
-  padding-top:calc(env(safe-area-inset-top, 0px) + 22px);
+  padding-top:calc(max(env(safe-area-inset-top, 0px), 20px) + 18px);
   background:linear-gradient(180deg,rgba(14,10,1,.97),rgba(14,10,1,.88));backdrop-filter:blur(8px);border-bottom:1px solid var(--line-soft)}
 .brand{display:flex;align-items:center;gap:12px;text-decoration:none;padding:8px 0 6px}
-.brand img{height:44px;width:auto;display:block;overflow:visible}
+.brand img{height:50px;width:auto;display:block;overflow:visible}
 .brand span{font-family:var(--display);font-stretch:125%;font-weight:800;font-size:12px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
 .nav{display:flex;align-items:stretch;background:rgba(243,238,228,.05);margin-right:-16px}
 .nav a{display:flex;align-items:center;padding:0 16px;color:var(--cream);text-decoration:none;font-size:14px;opacity:.82;border-bottom:2px solid transparent}
@@ -76,7 +79,7 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .tabbar{display:none}
 .sa-top{position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:#0e0a01;z-index:25}
 
-main{max-width:1240px;margin:0 auto;padding:28px max(16px,env(safe-area-inset-right)) 120px max(16px,env(safe-area-inset-left))}
+main{max-width:1240px;margin:0 auto;padding:28px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
 
 /* ---------- surfaces ---------- */
 .panel{background:linear-gradient(180deg,rgba(243,238,228,.045),rgba(243,238,228,.02));border:1px solid var(--line-soft);border-radius:var(--r);padding:18px}
@@ -245,7 +248,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 @media (max-width:980px), (pointer:coarse){ .in,select.in,textarea.in,input,select,textarea{font-size:16px!important} }
 @media (max-width:980px){
   .nav,.who .nm{display:none}
-  .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;background:rgba(14,10,1,.97);border-top:1px solid var(--line-soft);
+  .tabbar{display:flex;flex:none;position:relative;z-index:30;background:rgba(14,10,1,.97);border-top:1px solid var(--line-soft);
     padding:4px max(6px,env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left))}
   .tabbar a{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:6px 0;color:var(--muted);text-decoration:none;font-size:10.5px;font-weight:600;line-height:1}
   .tabbar a svg{width:22px;height:22px;display:block;flex:none}
@@ -267,7 +270,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
   .plangrid .plan-acts{grid-column:1/-1}
   .cal .day{min-height:58px;padding:3px}
   .cal .ev{font-size:0;padding:0;height:6px;border-left:0;background:currentColor}
-  .brand img{height:38px}
+  .brand img{height:44px}
   .hide-sm{display:none}
 }
 @media (prefers-reduced-motion:no-preference){
@@ -301,6 +304,6 @@ body.cb .toast.err{background:var(--bad);color:#140e02}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>
