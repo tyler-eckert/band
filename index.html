@@ -345,7 +345,7 @@ a.back:active{background:rgba(243,238,228,.14)}
 main.view,.modal>*{zoom:var(--tz,1)}
 /* ---------- offline (view-only) ---------- */
 .offline-bar{flex:none;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;padding:6px 12px;background:#2a1d05;color:var(--gold);font-size:13px;border-bottom:1px solid var(--line)}
-body.offline :is([data-act="gig-edit"],[data-act="sl-edit"],[data-act^="new-"],[data-act="sl-new"],[data-act="song-new"],[data-act="set-status"],[data-act^="exp-"],[data-act^="sale-"],[data-act^="merch-"],[data-act="opt-open"],[data-act="set-default"],[data-act="set-clear-ask"],[data-act="sl-dup"],[data-act="sl-del-ask"],[data-act="sl-unassign"],[data-act="rotate-token"],[data-act="save-settings"],[data-act="save-members"],[data-act="song-save"],[data-act="photo-del"],[data-act^="chart-del"],[data-act="chart-use"]),
+body.offline :is([data-act="gig-edit"],[data-act="sl-edit"],[data-act^="new-"],[data-act="sl-new"],[data-act="song-new"],[data-act="song-edit-mode"],[data-act="set-status"],[data-act^="exp-"],[data-act^="sale-"],[data-act^="merch-"],[data-act="opt-open"],[data-act="set-default"],[data-act="set-clear-ask"],[data-act="sl-dup"],[data-act="sl-del-ask"],[data-act="sl-unassign"],[data-act="rotate-token"],[data-act="save-settings"],[data-act="save-members"],[data-act="song-save"],[data-act="photo-del"],[data-act^="chart-del"],[data-act="chart-use"]),
 body.offline label:has(:is([data-photo],[data-chart-import],[data-chart-up])){display:none!important}
 body.offline :is(.chk,.stars:not(.ro),[data-chart-default],[data-text-size]){pointer-events:none;opacity:.45}
 body.offline [data-text-size]{pointer-events:auto;opacity:1}
@@ -362,6 +362,6 @@ body.offline [data-text-size]{pointer-events:auto;opacity:1}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>
