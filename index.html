@@ -66,9 +66,9 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .top{position:relative;flex:none;z-index:20;display:flex;align-items:stretch;justify-content:space-between;gap:12px;
   padding:0 max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left));
   padding-top:calc(max(env(safe-area-inset-top, 0px), 20px) + 18px);
-  background:#0e0a01;border-bottom:1px solid var(--line-soft)}   /* solid, like the status-bar strip and the footer: nothing scrolls under it any more, so no see-through haze */
+  background:#0e0a01;-webkit-backdrop-filter:none;backdrop-filter:none;isolation:isolate;border-bottom:1px solid var(--line-soft)}   /* solid, like the status-bar strip and the footer: nothing scrolls under it any more, so no see-through haze */
 .brand{display:flex;align-items:center;gap:12px;text-decoration:none;padding:8px 0 6px}
-.brand img{height:50px;width:auto;display:block;overflow:visible}
+.brand img{height:50px;width:auto;display:block;overflow:visible;image-rendering:-webkit-optimize-contrast;opacity:1;filter:none}
 .brand span{font-family:var(--display);font-stretch:125%;font-weight:800;font-size:12px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
 .nav{display:flex;align-items:stretch;background:rgba(243,238,228,.05);margin-right:-16px}
 .nav a{display:flex;align-items:center;padding:0 16px;color:var(--cream);text-decoration:none;font-size:14px;opacity:.82;border-bottom:2px solid transparent}
@@ -76,7 +76,14 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .nav a.on{color:var(--gold);opacity:1;font-weight:700;border-bottom-color:var(--gold)}
 .who{display:flex;align-items:center;gap:8px;padding-left:12px}
 .who img{width:30px;height:30px;border-radius:50%;object-fit:cover;filter:grayscale(1);border:1px solid var(--line)}
-.tabbar{display:none}
+/* the tab bar is the only navigation, at every screen size, in Safari and in the Home Screen app */
+.nav{display:none}
+.tabbar{display:flex;justify-content:center;position:fixed;left:0;right:0;bottom:-12px;z-index:30;background:#0e0a01;border-top:1px solid var(--line-soft);
+  padding:4px max(6px,env(safe-area-inset-right)) 14px max(6px,env(safe-area-inset-left))}
+.tabbar::after{content:"";position:absolute;left:0;right:0;top:100%;height:90px;background:#0e0a01}   /* nothing from the page shows beneath the bar */
+.tabbar a{flex:1 1 0;min-width:0;max-width:200px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:8px 0 0;color:var(--muted);text-decoration:none;font-size:10.5px;font-weight:600;line-height:1}
+.tabbar a svg{width:22px;height:22px;display:block;flex:none}
+.tabbar a.on{color:var(--gold)}
 .sa-top{position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:#0e0a01;z-index:25}
 
 main{max-width:1240px;margin:0 auto;padding:28px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
@@ -247,14 +254,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 /* iOS zooms into any field under 16px — keep fields at 16px on phones */
 @media (max-width:980px), (pointer:coarse){ .in,select.in,textarea.in,input,select,textarea{font-size:16px!important} }
 @media (max-width:980px){
-  .nav,.who .nm{display:none}
-  main{padding-bottom:72px}
-  .tabbar{display:flex;position:fixed;left:0;right:0;bottom:-12px;z-index:30;background:#0e0a01;border-top:1px solid var(--line-soft);
-    padding:4px max(6px,env(safe-area-inset-right)) 14px max(6px,env(safe-area-inset-left))}
-  .tabbar::after{content:"";position:absolute;left:0;right:0;top:100%;height:90px;background:#0e0a01}   /* nothing from the page shows beneath the bar */
-  .tabbar a{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:8px 0 0;color:var(--muted);text-decoration:none;font-size:10.5px;font-weight:600;line-height:1}
-  .tabbar a svg{width:22px;height:22px;display:block;flex:none}
-  .tabbar a.on{color:var(--gold)}
+  .who .nm{display:none}
   .split{grid-template-columns:minmax(0,1fr)}
   .g4{grid-template-columns:repeat(2,minmax(0,1fr))}
   .g3{grid-template-columns:minmax(0,1fr)}
@@ -352,9 +352,9 @@ body.offline [data-text-size]{pointer-events:auto;opacity:1}
 .gm-dn{padding:2px 14px 12px 50px;color:var(--gold);font-style:italic;font-size:15px;line-height:1.35;border-top:0}
 .snote-edit textarea.in{min-height:46px;resize:vertical;font-size:14px;line-height:1.35}
 .ptr{position:fixed;left:50%;transform:translateX(-50%);z-index:60;background:var(--gold);color:#140e02;font-weight:700;font-size:13px;padding:7px 16px;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);pointer-events:none}
-/* iPad: header up, footer down (the phone offsets were too much on a tablet) */
-@media (min-width:700px){ .top{padding-top:calc(env(safe-area-inset-top,0px) + 2px)} }
-@media (min-width:700px) and (max-width:980px){ .tabbar{bottom:-20px;padding-bottom:22px} }
+main{padding-bottom:72px}
+/* iPad: header a little lower than the bare minimum, footer lower */
+@media (min-width:700px){ .top{padding-top:calc(env(safe-area-inset-top,0px) + 10px)} .tabbar{bottom:-20px;padding-bottom:22px} }
 </style>
 </head>
 <body>
@@ -362,6 +362,6 @@ body.offline [data-text-size]{pointer-events:auto;opacity:1}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=23"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>
