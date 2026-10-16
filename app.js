@@ -8,8 +8,9 @@ const SUPABASE_KEY = 'sb_publishable_GP4wq5bwrQ3M0qCTwQei4A_Lsk_zBcK';   // publ
 const CAL_FUNCTION = 'band-calendar';                                        // Edge Function name for the live calendar feed
 
 /* ============================================================ data layer */
-const TABLES = ['members','settings','payees','clients','gigs','songs','setlists','setlist_items','song_ratings','merch_items','merch_sales','expenses'];
-const PK = { song_ratings: ['song_id','member_id'], settings: ['id'] };
+const TABLES = ['members','settings','payees','clients','gigs','songs','setlists','setlist_items','song_ratings','merch_items','merch_sales','expenses','song_charts','chart_prefs','chart_defaults'];
+const OPTIONAL = ['song_charts','chart_prefs','chart_defaults'];      // newer tables: the app still loads if their SQL hasn't been run yet
+const PK = { song_ratings: ['song_id','member_id'], settings: ['id'], chart_prefs: ['member_id','song_id'], chart_defaults: ['member_id'] };
 
 const supa = window.__BAND_MOCK__ ? null :
   (window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { db: { schema: 'band' } }) : null);
@@ -37,6 +38,9 @@ const api = window.__BAND_MOCK__ || {
   async uploadPhoto(path, blob) { const { error } = await supa.storage.from('band-photos').upload(path, blob, { contentType: 'image/jpeg' }); if (error) throw error; },
   async photoUrl(path) { const { data, error } = await supa.storage.from('band-photos').createSignedUrl(path, 3600); if (error) throw error; return data.signedUrl; },
   async removePhoto(path) { const { error } = await supa.storage.from('band-photos').remove([path]); if (error) throw error; },
+  async uploadChart(path, blob) { const { error } = await supa.storage.from('band-charts').upload(path, blob, { contentType: 'application/pdf', upsert: true }); if (error) throw error; },
+  async downloadChart(path) { const { data, error } = await supa.storage.from('band-charts').download(path); if (error) throw error; return data; },
+  async removeChart(path) { const { error } = await supa.storage.from('band-charts').remove([path]); if (error) throw error; },
   async remove(table, match) {
     let q = supa.from(table).delete();
     for (const [k, v] of Object.entries(match)) q = Array.isArray(v) ? q.in(k, v) : q.eq(k, v);
@@ -49,7 +53,7 @@ TABLES.forEach(t => S[t] = []);
 S._noteOpen = {};
 
 async function loadAll() {
-  const res = await Promise.all(TABLES.map(t => api.all(t)));
+  const res = await Promise.all(TABLES.map(t => api.all(t).catch(e => { if (OPTIONAL.includes(t)) return []; throw e; })));
   TABLES.forEach((t, i) => S[t] = res[i]);
   S.loaded = true;
   S.me = S.members.find(m => S.session && m.user_id === S.session.user.id) || null;
@@ -236,6 +240,7 @@ const keepUI = () => { try { localStorage.setItem('tfhq-ui', JSON.stringify(UI))
 
 function render() {
   document.body.classList.toggle('cb', !!UI.cb);
+  document.body.style.setProperty('--tz', UI.tz != null ? UI.tz : (window.innerWidth >= 700 ? 1.12 : 1));
   const app = $('#app');
   if (!S.session) return app.innerHTML = loginView();
   if (!S.loaded) return app.innerHTML = shell('home', '<p class="muted">Loading the band book…</p>');
@@ -707,6 +712,26 @@ const flowChips = (f) => `<div class="chips small">
   <span class="pill" style="color:${f.voxRuns ? 'var(--gold)' : 'var(--ok)'}">${cbm(!f.voxRuns)}${f.voxRuns} 3-in-a-row singer</span>
   <span class="pill" style="color:${f.genreRuns ? 'var(--gold)' : 'var(--ok)'}">${cbm(!f.genreRuns)}${f.genreRuns} 3-in-a-row genre</span></div>`;
 
+/* ----- export a setlist for playlist builders (Soundiiz, TuneMyMusic…) ----- */
+function exportRows(L) {
+  const seen = new Set();
+  return itemsOf(L.id).filter(i => i.played).sort((a, b) => a.set_no - b.set_no || a.position - b.position)
+    .map(i => ({ s: byId('songs', i.song_id), set: i.set_no })).filter(r => r.s && !seen.has(r.s.id) && seen.add(r.s.id))
+    .map(r => ({ title: r.s.title, artist: r.s.artist || '', set: r.set }));
+}
+const exportText = rows => rows.map(r => r.artist ? `${r.title} - ${r.artist}` : r.title).join('\n');
+const csvCell = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+const exportCsv = rows => ['Track,Artist,Set'].concat(rows.map(r => [r.title, r.artist, r.set].map(csvCell).join(','))).join('\r\n');
+function exportModal(L) {
+  const rows = exportRows(L), noArtist = rows.filter(r => !r.artist);
+  return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(640px,100%)">
+    <div class="row"><h2 class="sec" style="margin:0">Playlist export</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div>
+    <p class="small muted" style="margin:10px 0">${rows.length} song${rows.length === 1 ? '' : 's'} in setlist order. Paste the list (or upload the CSV) into a playlist converter such as Soundiiz or TuneMyMusic, point it at Spotify, and it builds the playlist.</p>
+    ${noArtist.length ? `<p class="small" style="color:var(--gold)">${noArtist.length} song${noArtist.length === 1 ? ' has' : 's have'} no artist (${noArtist.slice(0, 3).map(r => esc(r.title)).join(', ')}${noArtist.length > 3 ? '…' : ''}). Add the artist on the Songs page so they match the right recording.</p>` : ''}
+    <textarea class="in" readonly rows="10" style="font-family:inherit;line-height:1.5">${esc(exportText(rows))}</textarea>
+    <div class="row" style="margin-top:12px"><button class="btn gold" data-act="exp-copy" data-id="${L.id}">Copy list</button><button class="btn" data-act="exp-csv" data-id="${L.id}">Download CSV</button></div></div></div>`;
+}
+
 function setlistView(id) {
   const L = byId('setlists', id);
   if (!L) return `${title('Not found')}<p class="muted">That setlist may have been deleted. <a href="#setlists">Back to setlists</a></p>`;
@@ -727,7 +752,7 @@ function setlistRead(id) {
   ].filter(Boolean);
   return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="back">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
   ${title(slName(L), `Setlist · ${items.length} songs · ${hm(total)} of music`)}
-  <div class="row" style="margin-bottom:14px"><button class="btn gold" data-act="sl-edit">Edit</button><button class="btn" data-act="set-pdf">Stage PDF</button><button class="btn" data-act="set-text">Copy as text</button></div>
+  <div class="row" style="margin-bottom:14px"><button class="btn gold" data-act="gig-mode">▶ Gig mode</button><button class="btn" data-act="sl-edit">Edit</button><button class="btn" data-act="pl-export">Playlist export</button><button class="btn" data-act="set-pdf">Stage PDF</button><button class="btn" data-act="set-text">Copy as text</button></div>
   <section class="panel" style="margin-bottom:14px"><div class="kv">${facts.join('')}</div>${L.notes ? `<p style="margin:14px 0 0;white-space:pre-wrap">${esc(L.notes)}</p>` : ''}</section>
   ${setlistSets(L, false)}`;
 }
@@ -1018,7 +1043,7 @@ function songsView() {
   const stats = songStats(), q = UI.songSearch.toLowerCase(), f = UI.songFilter;
   let rows = S.songs.filter(s => (f === 'all' || s.status === f) && (!q || [s.title, s.artist, s.lead_vox, s.starter, s.genre].join(' ').toLowerCase().includes(q)));
   const key = UI.songSort, dir = UI.songSortDir === 'desc' ? -1 : 1;
-  const val = s => ({ title: s.title, artist: s.artist || '', key: s.song_key || '', length: n0(s.length_min), lead: s.lead_vox || '', mine: myRating(s.id), avg: avgRating(s.id) || 0, genre: (s.genre || '') + (9 - n0(s.energy)), plays: (stats[s.id] || {}).plays || 0, last: (stats[s.id] || {}).last || '', year: s.year || 0 }[key]);
+  const val = s => ({ title: s.title, artist: s.artist || '', key: s.song_key || '', length: n0(s.length_min), bpm: n0(s.bpm), lead: s.lead_vox || '', mine: myRating(s.id), avg: avgRating(s.id) || 0, genre: (s.genre || '') + (9 - n0(s.energy)), plays: (stats[s.id] || {}).plays || 0, last: (stats[s.id] || {}).last || '', year: s.year || 0 }[key]);
   rows.sort((a, b) => { const x = val(a), y = val(b); return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * dir; });
   const counts = Object.fromEntries(['active','bench','learning','retired','holiday'].map(k => [k, S.songs.filter(s => s.status === k).length]));
   const th = (k, l, cls = '') => `<th data-act="song-sort" data-v="${k}" class="${cls}">${l}${UI.songSort === k ? (dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
@@ -1026,14 +1051,15 @@ function songsView() {
   return `${title('Songs')}
   <div class="row" style="margin-bottom:14px">
     <div class="chips">${[['active','Active'],['learning','Learning'],['bench','Bench'],['holiday','Holiday'],['retired','Retired'],['all','All']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-act="song-filter" data-v="${k}">${l}${k !== 'all' ? ' ' + counts[k] : ''}</button>`).join('')}</div>
-    <span class="spacer"></span><input class="in" id="songSearch" placeholder="Search title, artist, singer" value="${esc(UI.songSearch)}" style="width:220px"><button class="btn gold" data-act="song-new">+ Song</button>
+    <span class="spacer"></span><input class="in" id="songSearch" placeholder="Search title, artist, singer" value="${esc(UI.songSearch)}" style="width:220px"><label class="btn" style="cursor:pointer">Import charts<input type="file" accept="application/pdf" multiple hidden data-chart-import></label><button class="btn gold" data-act="song-new">+ Song</button>
   </div>
   <section class="panel"><div class="tbl-wrap"><table class="tbl">
-    <thead><tr>${th('title', 'Song')}${th('key', 'Key')}${th('length', 'Len', 'r')}${th('lead', 'Lead vox', 'hide-sm')}${th('genre', 'Genre', 'hide-sm')}${th('mine', 'Your rating')}${th('avg', 'Band', 'hide-sm')}${th('plays', 'Plays', 'r')}${th('last', 'Last played', 'hide-sm')}</tr></thead>
+    <thead><tr>${th('title', 'Song')}${th('key', 'Key')}${th('length', 'Len', 'r')}${th('bpm', 'BPM', 'r hide-sm')}${th('lead', 'Lead vox', 'hide-sm')}${th('genre', 'Genre', 'hide-sm')}${th('mine', 'Your rating')}${th('avg', 'Band', 'hide-sm')}${th('plays', 'Plays', 'r')}${th('last', 'Last played', 'hide-sm')}</tr></thead>
     <tbody>${rows.map(s => { const r = ratingsFor(s.id); return `<tr class="click" data-act="song-edit" data-id="${s.id}">
-      <td><b>${esc(s.title)}</b>${s.is_opener ? ' <span class="pill st-confirmed">Opener</span>' : ''}${s.is_closer ? ' <span class="pill st-confirmed">Closer</span>' : ''}${s.is_encore ? ' <span class="pill st-confirmed">Encore</span>' : ''}<div class="small muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></td>
+      <td><b>${esc(s.title)}</b>${s.is_opener ? ' <span class="pill st-confirmed">Opener</span>' : ''}${s.is_closer ? ' <span class="pill st-confirmed">Closer</span>' : ''}${s.is_encore ? ' <span class="pill st-confirmed">Encore</span>' : ''}${chartFor(s.id) ? ' <span class="small" style="color:var(--gold)" title="You have a PDF chart for this song">PDF</span>' : ''}<div class="small muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></td>
       <td class="num">${esc(s.song_key || '')}${s.capo ? `<div class="small muted">capo ${s.capo}</div>` : ''}</td>
       <td class="r num">${mins(s.length_min)}</td>
+      <td class="r num hide-sm">${s.bpm || '<span class="faint">—</span>'}</td>
       <td class="hide-sm">${esc(s.lead_vox || '')}</td>
       <td class="hide-sm small">${esc(s.genre || '')}<div class="faint" title="Energy ${s.energy || '?'} of 5">${'▮'.repeat(s.energy || 0)}</div></td>
       <td><div class="stars" data-stop>${[1, 2, 3, 4, 5].map(i => `<button class="${myRating(s.id) >= i ? 'on' : ''}" data-act="rate" data-id="${s.id}" data-v="${i}" aria-label="${i} stars">★</button>`).join('')}</div></td>
@@ -1050,7 +1076,7 @@ function songModal(s) {
     <div class="fgrid" style="margin-top:14px">
       ${f('title', 'Title', 'text', 'w2')}${f('artist', 'Artist', 'text', 'w2')}
       <label class="f">Status<select class="in" data-s="status">${['active','learning','bench','holiday','retired'].map(x => `<option ${s.status === x ? 'selected' : ''} value="${x}">${cap(x)}</option>`).join('')}</select></label>
-      ${f('song_key', 'Key')}${f('capo', 'Capo', 'number')}
+      ${f('song_key', 'Key')}${f('capo', 'Capo', 'number')}${f('bpm', 'BPM', 'number')}
       <label class="f">Length (m:ss)<input class="in" data-s="length_fmt" value="${s.length_min ? mins(s.length_min) : ''}" placeholder="3:45"></label>
       ${f('lead_vox', 'Lead vox', 'text', 'w2')}${f('starter', 'Starts it', 'text', 'w2')}
       <label class="f w2">Genre<input class="in" data-s="genre" list="genreList" value="${esc(s.genre || '')}"><datalist id="genreList">${[...new Set(S.songs.map(x => x.genre).filter(Boolean))].sort().map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
@@ -1063,6 +1089,7 @@ function songModal(s) {
       ${f('chart_url', 'Chart link (PDF / Drive)', 'url', 'w4')}
       <label class="f w4">Notes<input class="in" data-s="comment" value="${esc(s.comment || '')}" placeholder="e.g. tuning half step down"></label>
     </div>
+    ${s.id ? `<h2 class="sec" style="margin-top:18px">Charts (PDF)</h2>${chartBox(s)}` : ''}
     <h2 class="sec" style="margin-top:18px">Who plays what</h2>
     <div class="fgrid">${ms.map(m => `<label class="f">${esc(m.name)}<input class="in" data-part="${esc(m.name)}" value="${esc(p[m.name] || '')}"></label>`).join('')}</div>
     ${s.id ? `<h2 class="sec" style="margin-top:18px">Band ratings</h2><div class="row small">${ms.map(m => { const r = S.song_ratings.find(x => x.song_id === s.id && x.member_id === m.id); return `<span>${esc(m.name)} <span class="stars ro">${starsRO(r && r.rating)}</span></span>`; }).join('')}</div>` : ''}
@@ -1225,6 +1252,9 @@ function settingsView() {
   return `${title('The Band')}
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
+    <label class="f" style="margin-top:14px;max-width:320px">Text size<select class="in" data-text-size><option value="auto" ${UI.tz == null ? 'selected' : ''}>Auto (a bit larger on iPad)</option><option value="1" ${UI.tz === 1 ? 'selected' : ''}>Normal</option><option value="1.12" ${UI.tz === 1.12 ? 'selected' : ''}>Large</option><option value="1.25" ${UI.tz === 1.25 ? 'selected' : ''}>Extra large</option></select></label>
+    ${(() => { if (!S.me) return ''; const cur = S.chart_defaults.find(d => d.member_id === S.me.id), ids = new Set(S.song_charts.filter(c => c.member_id !== S.me.id).map(c => c.member_id)); if (cur) ids.add(cur.use_member_id); const mine = S.song_charts.filter(c => c.member_id === S.me.id).length;
+      return `<label class="f" style="margin-top:14px">When I don’t have my own chart for a song, use…<select class="in" data-chart-default><option value="">Nobody’s (leave it blank)</option>${[...ids].map(id => `<option value="${id}" ${cur && cur.use_member_id === id ? 'selected' : ''}>${esc((byId('members', id) || {}).name || 'Bandmate')}’s chart</option>`).join('')}</select></label><div class="small muted" style="margin-top:4px">You have ${mine} chart${mine === 1 ? '' : 's'} of your own. You can still pick a different chart song by song from the song’s page.</div>`; })()}
   </section>
   <section class="team" style="margin-bottom:18px">${ms.filter(m => m.active).map(m => `<div class="mate"><img src="${photo(m)}" alt="${esc(m.name)}"><div class="plate"><small>${esc(m.instrument || '')}</small>${esc(m.name)}</div></div>`).join('')}</section>
   <div class="grid g2">
@@ -1445,6 +1475,188 @@ function mailModal(g, kind) {
       ${['quote','invoice'].includes(kind) ? `<span class="small faint">Attach the ${kind} PDF from the gig page.</span>` : ''}</div>
   </div></div>`;
 }
+/* ============================================================ personal PDF charts */
+const chartOf = (songId, memberId) => S.song_charts.find(c => c.song_id === songId && c.member_id === memberId) || null;
+function chartFor(songId, memberId = S.me && S.me.id) {          // which PDF this member sees for a song
+  if (!memberId) return null;
+  const pref = S.chart_prefs.find(p => p.member_id === memberId && p.song_id === songId);
+  if (pref) { const c = chartOf(songId, pref.use_member_id); if (c) return { chart: c, via: 'pick' }; }
+  const mine = chartOf(songId, memberId); if (mine) return { chart: mine, via: 'own' };
+  const d = S.chart_defaults.find(x => x.member_id === memberId);
+  if (d) { const c = chartOf(songId, d.use_member_id); if (c) return { chart: c, via: 'default' }; }
+  return null;
+}
+/* PDFs are kept on the device after the first open, so a weak venue connection can't take the charts away */
+const chartDB = () => new Promise((res, rej) => { const r = indexedDB.open('tfhq-charts', 1); r.onupgradeneeded = () => r.result.createObjectStore('pdf'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+async function cacheGet(key) { try { const db = await chartDB(); return await new Promise(res => { const q = db.transaction('pdf').objectStore('pdf').get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch { return null; } }
+async function cachePut(key, buf) { try { const db = await chartDB(); await new Promise(res => { const tx = db.transaction('pdf', 'readwrite'); tx.objectStore('pdf').put(buf, key); tx.oncomplete = tx.onerror = tx.onabort = () => res(); }); } catch {} }
+async function chartData(c) {
+  const key = `${c.path}|${c.updated_at || c.created_at || ''}`;
+  let buf = await cacheGet(key); if (buf) return buf;
+  const blob = await api.downloadChart(c.path); buf = await blob.arrayBuffer(); cachePut(key, buf); return buf;
+}
+let pdfjsReady = null;
+function loadPdfJs() {                                             // local copy first (pdf.min.js + pdf.worker.min.js next to index.html), then the CDN
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (pdfjsReady) return pdfjsReady;
+  const add = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('PDF viewer failed to load')); document.head.appendChild(s); });
+  const CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  pdfjsReady = add('pdf.min.js?v=3.11.174').then(() => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js?v=3.11.174'; })
+    .catch(() => add(CDN + 'pdf.min.js').then(() => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = CDN + 'pdf.worker.min.js'; }))
+    .then(() => window.pdfjsLib);
+  pdfjsReady.catch(() => { pdfjsReady = null; });
+  return pdfjsReady;
+}
+async function uploadChart(songId, file) {
+  if (!S.me) throw new Error('Your login isn’t on the band roster yet.');
+  if (!/pdf/i.test(file.type) && !/\.pdf$/i.test(file.name)) throw new Error(`${file.name} isn’t a PDF`);
+  if (file.size > 48 * 1024 * 1024) throw new Error(`${file.name} is over 48 MB`);
+  const path = `${S.me.id}/${songId}.pdf`; await api.uploadChart(path, file);
+  const cur = chartOf(songId, S.me.id);
+  await save('song_charts', { ...(cur || { id: uuid(), song_id: songId, member_id: S.me.id }), path, filename: file.name, updated_at: new Date().toISOString() });
+}
+const normT = s => String(s || '').toLowerCase().replace(/\.pdf$/, '').replace(/[_\-.()\[\]]+/g, ' ').replace(/\b(chart|charts|chords?|lead ?sheet|lyrics|tab|capo \d+|key of [a-g][#b]?)\b/g, ' ').replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+function matchSong(fileName) {
+  const f = normT(fileName); let best = null, bs = 0;
+  S.songs.forEach(s => {
+    const t = normT(s.title); if (!t || !f) return; let sc = 0;
+    if (f === t) sc = 1;
+    else if (t.length >= 4 && (` ${f} `).includes(` ${t} `)) sc = .75 + .25 * t.length / f.length;
+    else if (f.length >= 4 && (` ${t} `).includes(` ${f} `)) sc = .75 + .25 * f.length / t.length;
+    else { const A = new Set(f.split(' ')), B = new Set(t.split(' ')); const inter = [...A].filter(x => B.has(x)).length; sc = inter / (A.size + B.size - inter); }
+    if (sc > bs) { bs = sc; best = s; }
+  });
+  return bs >= .5 ? best : null;
+}
+function chartBox(s) {
+  const me = S.me; if (!me) return '<div id="chartBox"></div>';
+  const mine = chartOf(s.id, me.id), res = chartFor(s.id), others = S.song_charts.filter(c => c.song_id === s.id && c.member_id !== me.id);
+  const nm = id => (byId('members', id) || {}).name || 'A bandmate', using = res ? res.chart.member_id : null;
+  const row = (label, right, on) => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line-soft);gap:8px;flex-wrap:wrap"><div class="grow"><b>${label}</b>${on ? ' <span class="pill st-confirmed">In use</span>' : ''}</div>${right}</div>`;
+  return `<div id="chartBox">
+    ${row('My chart', mine ? `<span class="small muted">${esc(mine.filename || 'chart.pdf')}</span><button class="btn sm" data-act="chart-open" data-id="${mine.id}">Open</button><label class="btn sm" style="cursor:pointer">Replace<input type="file" accept="application/pdf" hidden data-chart-up="${s.id}"></label><button class="btn sm danger" data-act="chart-del" data-id="${mine.id}">Remove</button>`
+      : `<label class="btn sm gold" style="cursor:pointer">Upload my PDF<input type="file" accept="application/pdf" hidden data-chart-up="${s.id}"></label>`, using === me.id)}
+    ${others.map(c => row(`${esc(nm(c.member_id))}’s chart`, `<button class="btn sm" data-act="chart-open" data-id="${c.id}">Open</button>${using === c.member_id ? '' : `<button class="btn sm" data-act="chart-use" data-sid="${s.id}" data-m="${c.member_id}">Use theirs</button>`}`, using === c.member_id)).join('')}
+    ${mine && using !== me.id ? `<div class="row" style="padding-top:8px"><button class="btn sm" data-act="chart-use" data-sid="${s.id}" data-m="own">Use my own instead</button></div>` : ''}
+    ${!res ? '<p class="small muted" style="margin:8px 0 0">No chart yet — upload yours, or use a bandmate’s once they add theirs.</p>' : ''}
+  </div>`;
+}
+function refreshChartBox(songId) { const b = $('#chartBox'); const s = byId('songs', songId); if (b && s) b.outerHTML = chartBox(s); render(); }
+function importModal() {
+  const rows = S._imp.rows, n = rows.filter(r => r.songId).length;
+  const opts = sel => '<option value="">— skip —</option>' + S.songs.slice().sort((a, b) => a.title.localeCompare(b.title)).map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${esc(s.title)}${s.artist ? ' — ' + esc(s.artist) : ''}</option>`).join('');
+  return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(760px,100%)">
+    <div class="row"><h2 class="sec" style="margin:0">Import charts</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div>
+    <p class="small muted">Matched to songs by file name. These become <b>your</b> charts — bandmates can use them or add their own. Fix any wrong match below.</p>
+    <div class="stack" style="max-height:55vh;overflow:auto;margin-top:8px">${rows.map((r, i) => `<div class="row" style="gap:8px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:8px"><div class="grow small" style="min-width:160px;word-break:break-all">${esc(r.file.name)}<div class="faint">${(r.file.size / 1e6).toFixed(1)} MB${r.songId && chartOf(r.songId, S.me.id) ? ' · replaces your current chart' : ''}</div></div><select class="in" data-imp="${i}" style="max-width:300px">${opts(r.songId)}</select></div>`).join('')}</div>
+    <div class="row" style="margin-top:14px"><button class="btn gold" data-act="chart-import-go" ${n ? '' : 'disabled'}>Upload ${n} chart${n === 1 ? '' : 's'}</button><span class="small faint" id="impStatus"></span></div></div></div>`;
+}
+
+/* ============================================================ gig mode */
+const GM = { open: false, seq: [], i: 0, zoom: 1, tok: 0, lid: null, preview: false, lock: null, awake: false, doc: null, drawer: false };
+const GM_ZOOM = [1, 1.25, 1.5, 2, 2.5, 3];
+function gmSeq(L) { return itemsOf(L.id).filter(i => i.played).sort((a, b) => a.set_no - b.set_no || a.position - b.position).map(i => ({ item: i, song: byId('songs', i.song_id), set: i.set_no })); }
+function openGigMode(seq, lid, opts = {}) {
+  if (!seq.length) return toast('Add songs first.', true);
+  closeGigMode(true);
+  Object.assign(GM, { open: true, seq, lid, preview: !!opts.preview, zoom: 1, tok: 0, drawer: false });
+  const saved = lid ? Number(sessionStorage.getItem('tfgm:' + lid)) : 0; GM.i = saved >= 0 && saved < seq.length ? saved : 0;
+  const d = document.createElement('div'); d.id = 'gigMode'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', 'Gig mode');
+  d.innerHTML = `<div class="gm-top"><button class="gm-btn" data-gm="exit" aria-label="Exit gig mode">✕</button>
+    <div class="gm-title"><div class="gm-t1" id="gmT1"></div><div class="gm-t2"><span id="gmT2"></span> <span id="gmPre"></span></div></div>
+    <button class="gm-awake" data-gm="awake" id="gmAwake"></button>
+    <button class="gm-btn" data-gm="zoom-out" aria-label="Smaller">A−</button><button class="gm-btn" data-gm="zoom-in" aria-label="Bigger">A+</button>${GM.preview ? '' : '<button class="gm-btn" data-gm="list" aria-label="Song list">☰</button>'}</div>
+    <div class="gm-view" id="gmView"></div><div class="gm-bottom" id="gmBottom"></div><div class="gm-drawer" id="gmDrawer" hidden></div>`;
+  document.body.appendChild(d);
+  d.addEventListener('click', gmClick); document.addEventListener('keydown', gmKey); document.addEventListener('visibilitychange', gmVis);
+  gmWake(); gmShow(GM.i); if (!GM.preview) gmPrefetch();
+}
+function closeGigMode(quiet) {
+  const d = $('#gigMode'); if (d) d.remove();
+  document.removeEventListener('keydown', gmKey); document.removeEventListener('visibilitychange', gmVis);
+  if (GM.lock) { try { GM.lock.release(); } catch {} GM.lock = null; }
+  if (GM.doc) { try { GM.doc.destroy(); } catch {} GM.doc = null; }
+  GM.open = false; GM.tok++;
+}
+async function gmWake() {
+  try { if (navigator.wakeLock) { GM.lock = await navigator.wakeLock.request('screen'); GM.awake = true; GM.lock.addEventListener('release', () => { GM.awake = false; gmBadge(); }); } else GM.awake = false; } catch { GM.awake = false; }
+  gmBadge();
+}
+function gmBadge() { const b = $('#gmAwake'); if (b) b.innerHTML = GM.awake ? '<span style="color:var(--ok)">● awake</span>' : '<span style="color:var(--gold)">⚠ may sleep</span>'; }
+function gmVis() { if (document.visibilityState === 'visible' && GM.open) gmWake(); }
+function gmKey(e) { if (!GM.open) return; if (e.key === 'ArrowRight') { e.preventDefault(); gmShow(GM.i + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); gmShow(GM.i - 1); } else if (e.key === 'Escape') closeGigMode(); }
+function gmClick(e) {
+  const el = e.target.closest('[data-gm]'); if (!el) return; const a = el.dataset.gm;
+  if (a === 'exit') closeGigMode();
+  else if (a === 'next') gmShow(GM.i + 1); else if (a === 'prev') gmShow(GM.i - 1);
+  else if (a === 'zoom-in' || a === 'zoom-out') { const k = GM_ZOOM.indexOf(GM.zoom); GM.zoom = GM_ZOOM[Math.max(0, Math.min(GM_ZOOM.length - 1, k + (a === 'zoom-in' ? 1 : -1)))]; gmLoadChart(); }
+  else if (a === 'list') { GM.drawer = !GM.drawer; gmDrawer(); }
+  else if (a === 'go') { GM.drawer = false; gmDrawer(); gmShow(Number(el.dataset.i)); }
+  else if (a === 'awake') toast(GM.awake ? 'Screen stays on while gig mode is open.' : 'This phone won’t let a web page keep the screen on (iOS Home Screen apps need iOS 18.4 or newer). Set Settings → Display & Brightness → Auto-Lock → Never for the gig.', !GM.awake);
+}
+function gmDrawer() {
+  const dr = $('#gmDrawer'); if (!dr) return; dr.hidden = !GM.drawer; if (!GM.drawer) return;
+  let last = null;
+  dr.innerHTML = `<div class="row" style="padding:12px"><b style="font-size:18px">Songs</b><span class="spacer"></span><button class="gm-btn" data-gm="list">✕</button></div>` + GM.seq.map((x, k) => { const h = x.set !== last ? `<div class="gm-dh">Set ${x.set}</div>` : ''; last = x.set; const s = x.song || {}; return `${h}<button class="gm-di ${k === GM.i ? 'on' : ''}" data-gm="go" data-i="${k}"><span class="n">${k + 1}</span><span class="grow">${esc(s.title || '?')}</span><span class="small">${esc(songLabel(s))}${chartFor(s.id) || x.forceChart ? '' : ' · no chart'}</span></button>`; }).join('');
+}
+function gmShow(i) {
+  if (i < 0 || i >= GM.seq.length) return;
+  GM.i = i; if (GM.lid) sessionStorage.setItem('tfgm:' + GM.lid, String(i));
+  const cur = GM.seq[i], s = cur.song || {}, inSet = GM.seq.filter(x => x.set === cur.set), pos = inSet.indexOf(cur) + 1;
+  $('#gmT1').textContent = s.title || '(deleted song)';
+  $('#gmT2').textContent = GM.preview ? songLabel(s) : `Set ${cur.set} · ${pos} of ${inSet.length} · song ${i + 1}/${GM.seq.length}`;
+  $('#gmBottom').innerHTML = gmBottom(); gmBadge(); gmLoadChart();
+}
+function gmBottom() {
+  const cur = GM.seq[GM.i], nxt = GM.seq[GM.i + 1], s = cur.song || {};
+  if (GM.preview) return `<div class="gm-info"><b>${esc(s.title || '')}</b> <span class="gm-bits">Key ${esc(s.song_key || '?')}${s.capo ? ' · capo ' + s.capo : ''}${s.bpm ? ' · ♩ ' + s.bpm + ' BPM' : ''}${s.starter ? ' · Starts: ' + esc(s.starter) : ''}${s.lead_vox ? ' · Lead: ' + esc(s.lead_vox) : ''}</span></div>`;
+  const say = cur.item && cur.item.note;
+  let next;
+  if (!nxt) next = '<div class="gm-next"><span class="gm-lbl">END</span> <b>That’s the last song</b></div>';
+  else {
+    const ns = nxt.song || {}, c = changes(s, ns), brk = nxt.set !== cur.set;
+    const bits = [`Key ${esc(ns.song_key || '?')}${ns.capo ? ' · capo ' + ns.capo : ''}`, ns.bpm ? `♩ <b>${ns.bpm}</b> BPM` : '', ns.starter ? `Starts: <b>${esc(ns.starter)}</b>` : '', ns.lead_vox ? `Lead: ${esc(ns.lead_vox)}` : ''].filter(Boolean);
+    const alerts = brk ? [] : [...(c.tuning ? [`retune → ${esc(ns.tuning || 'Standard')}`] : []), ...c.inst.map(x => `${esc(x.who)}: ${esc(x.to)}`)];
+    next = `<div class="gm-next"><span class="gm-lbl">${brk ? 'NEXT SET' : 'NEXT'}</span> <b>${esc(ns.title || '')}</b> <span class="gm-bits">${bits.join(' · ')}</span></div>${alerts.length ? `<div class="gm-alert">⇄ ${alerts.join(' · ')}</div>` : ''}`;
+  }
+  const notes = GM.seq.map((x, k) => ({ x, k })).filter(o => o.x.set === cur.set && o.x.item && o.x.item.note);
+  return `<div class="gm-nav"><button class="gm-nb" data-gm="prev" ${GM.i ? '' : 'disabled'} aria-label="Previous song">◀</button>
+    <div class="gm-info">${s.bpm || s.song_key ? `<div class="gm-now"><span class="gm-lbl">NOW</span> ${s.bpm ? `♩ <b>${s.bpm}</b> BPM` : ''}${s.bpm && s.song_key ? ' · ' : ''}${s.song_key ? 'Key ' + esc(s.song_key) + (s.capo ? ' · capo ' + s.capo : '') : ''}</div>` : ''}${say ? `<div class="gm-say"><span class="gm-lbl">SAY</span> ${esc(say)}</div>` : ''}${next}
+      ${notes.length ? `<div class="gm-notes"><span class="gm-lbl">NOTES · SET ${cur.set}</span>${notes.map(o => `<div class="${o.k < GM.i ? 'past' : o.k === GM.i ? 'now' : ''}">after <b>${esc((o.x.song || {}).title || '')}</b>: ${esc(o.x.item.note)}</div>`).join('')}</div>` : ''}</div>
+    <button class="gm-nb" data-gm="next" ${nxt ? '' : 'disabled'} aria-label="Next song">▶</button></div>`;
+}
+function gmNoChart(cur) {
+  const s = cur.song || {};
+  return `<div class="gm-card"><div class="gm-big">${esc(s.title || '')}</div><div class="gm-bigsub">Key ${esc(s.song_key || '?')}${s.capo ? ' · capo ' + s.capo : ''}</div>${s.starter ? `<div>Starts: <b>${esc(s.starter)}</b></div>` : ''}${s.lead_vox ? `<div>Lead vocal: ${esc(s.lead_vox)}</div>` : ''}${s.comment ? `<div class="muted" style="margin-top:8px">${esc(s.comment)}</div>` : ''}<div class="muted" style="margin-top:14px">No PDF chart for you on this one yet.</div></div>`;
+}
+async function gmLoadChart() {
+  const tok = ++GM.tok, cur = GM.seq[GM.i], v = $('#gmView'); if (!v) return; v.scrollTop = 0; v.scrollLeft = 0;
+  const ch = cur.forceChart ? { chart: cur.forceChart } : (cur.song ? chartFor(cur.song.id) : null);
+  if (!ch) { v.innerHTML = gmNoChart(cur); return; }
+  v.innerHTML = '<div class="gm-msg">Loading chart…</div>';
+  try {
+    const [lib, buf] = await Promise.all([loadPdfJs(), chartData(ch.chart)]); if (tok !== GM.tok) return;
+    const pdf = await lib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise; if (tok !== GM.tok) { pdf.destroy(); return; }
+    if (GM.doc) { try { GM.doc.destroy(); } catch {} } GM.doc = pdf;
+    v.innerHTML = ''; const W = v.clientWidth - 12, H = v.clientHeight - 12, dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n); if (tok !== GM.tok) return;
+      const v0 = page.getViewport({ scale: 1 });
+      let w = W * GM.zoom; if (GM.zoom === 1 && pdf.numPages === 1) w = Math.min(W, H * v0.width / v0.height);     // a one-page chart fits the whole screen
+      const vp = page.getViewport({ scale: w / v0.width * dpr });
+      const cv = document.createElement('canvas'); cv.className = 'gm-page'; cv.width = Math.floor(vp.width); cv.height = Math.floor(vp.height); cv.style.width = vp.width / dpr + 'px'; cv.style.height = vp.height / dpr + 'px';
+      v.appendChild(cv); await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+    }
+  } catch (e) { if (tok === GM.tok) v.innerHTML = `<div class="gm-msg">Couldn’t show this chart${navigator.onLine ? '' : ' — you’re offline and it hasn’t been saved on this phone yet'}.<br><small>${esc(e.message || '')}</small></div>${gmNoChart(cur)}`; }
+}
+async function gmPrefetch() {                                       // save every chart in the setlist on this device while there's signal
+  const need = GM.seq.map(x => x.song && chartFor(x.song.id)).filter(Boolean); if (!need.length) return;
+  for (let k = 0; k < need.length; k++) {
+    if (!GM.open) return; try { await chartData(need[k].chart); } catch {}
+    const el = $('#gmPre'); if (el) el.textContent = k + 1 < need.length ? `· saving charts ${k + 1}/${need.length}` : '· charts saved offline';
+  }
+}
+
 function openModal(html) { closeModal(); const d = document.createElement('div'); d.id = 'modalRoot'; d.innerHTML = html; document.body.appendChild(d); const f = d.querySelector('input,select'); if (f) f.focus(); }
 function closeModal() { const m = $('#modalRoot'); if (m) m.remove(); }
 
@@ -1474,6 +1686,27 @@ document.addEventListener('change', e => {
   const was = { ...(S._opt.plan || {}) }; readOpt(); const now = S._opt.plan;
   if (e.target.dataset.optplan === 'set_count' && n0(was.break_count) === n0(was.set_count) - 1) now.break_count = Math.max(0, Math.round(n0(now.set_count) || 1) - 1);   // keep "a break between each set"
   S._opt.res = null; refreshOpt();
+});
+
+document.addEventListener('change', async e => {
+  const t = e.target; if (!t.matches) return;
+  if (t.matches('[data-chart-up]')) {
+    const f = t.files[0], sid = t.dataset.chartUp; t.value = ''; if (!f) return;
+    try { toast('Uploading chart…'); await uploadChart(sid, f); toast('Chart saved'); refreshChartBox(sid); } catch (err) { toast(err.message || 'Upload failed', true); }
+  } else if (t.matches('[data-chart-import]')) {
+    const files = [...t.files]; t.value = ''; if (!files.length) return;
+    if (!S.me) return toast('Your login isn’t on the band roster yet.', true);
+    S._imp = { rows: files.map(f => { const s = matchSong(f.name); return { file: f, songId: s ? s.id : '' }; }) }; openModal(importModal());
+  } else if (t.matches('[data-imp]')) {
+    S._imp.rows[Number(t.dataset.imp)].songId = t.value; const n = S._imp.rows.filter(r => r.songId).length, b = $('[data-act="chart-import-go"]');
+    if (b) { b.textContent = `Upload ${n} chart${n === 1 ? '' : 's'}`; b.disabled = !n; }
+  } else if (t.matches('[data-text-size]')) {
+    UI.tz = t.value === 'auto' ? null : Number(t.value); keepUI(); render();
+  } else if (t.matches('[data-chart-default]')) {
+    if (!S.me) return;
+    try { if (!t.value) { await api.remove('chart_defaults', { member_id: S.me.id }); S.chart_defaults = S.chart_defaults.filter(d => d.member_id !== S.me.id); } else await saveMany('chart_defaults', [{ member_id: S.me.id, use_member_id: t.value }]); toast('Saved'); render(); }
+    catch (err) { toast(err.message || 'Could not save', true); }
+  }
 });
 
 document.addEventListener('submit', async e => {
@@ -1535,6 +1768,27 @@ const ACTIONS = {
     if (await guard(() => save('gigs', { ...cur, photos: photosOf(cur).filter(p => p.path !== path) }), 'Photo removed') && tile) tile.remove();
   },
   'si-note': ({ id }) => { S._noteOpen[id] = !S._noteOpen[id]; render(); const el = $(`[data-si-note="${id}"]`); if (el) el.focus(); },
+  'pl-export': ({ g }) => { const L = g && byId('setlists', g.id); if (L) openModal(exportModal(L)); },
+  'exp-copy': ({ id }) => { const L = byId('setlists', id); if (L) copy(exportText(exportRows(L))); },
+  'exp-csv': ({ id }) => { const L = byId('setlists', id); if (L) download(`Playlist - ${slName(L)}.csv`, exportCsv(exportRows(L)), 'text/csv'); },
+  'gig-mode': ({ g }) => { const L = g && byId('setlists', g.id); if (!L) return; openGigMode(gmSeq(L), L.id); },
+  'chart-open': ({ id }) => { const c = byId('song_charts', id); if (!c) return; openGigMode([{ item: {}, song: byId('songs', c.song_id), set: 1, forceChart: c }], null, { preview: true }); },
+  'chart-use': async ({ el }) => {
+    const sid = el.dataset.sid, m = el.dataset.m; if (!S.me) return;
+    if (m === 'own') { await guard(() => api.remove('chart_prefs', { member_id: S.me.id, song_id: sid })); S.chart_prefs = S.chart_prefs.filter(p => !(p.member_id === S.me.id && p.song_id === sid)); }
+    else await guard(() => saveMany('chart_prefs', [{ member_id: S.me.id, song_id: sid, use_member_id: m }]));
+    refreshChartBox(sid);
+  },
+  'chart-del': async ({ id }) => {
+    const c = byId('song_charts', id); if (!c || !confirm('Remove your chart for this song?')) return;
+    try { await api.removeChart(c.path); } catch {}
+    if (await guard(() => del('song_charts', id), 'Chart removed')) refreshChartBox(c.song_id);
+  },
+  'chart-import-go': async () => {
+    const rows = S._imp.rows.filter(r => r.songId), st = $('#impStatus'); let ok = 0; const bad = [];
+    for (let k = 0; k < rows.length; k++) { if (st) st.textContent = `Uploading ${k + 1} of ${rows.length}…`; try { await uploadChart(rows[k].songId, rows[k].file); ok++; } catch (e) { bad.push(`${rows[k].file.name}: ${e.message}`); } }
+    closeModal(); render(); toast(bad.length ? `${ok} saved, ${bad.length} failed — ${bad[0]}` : `${ok} chart${ok === 1 ? '' : 's'} saved`, !!bad.length);
+  },
   'gig-edit': ({ g }) => { if (!g) return; S.editGig = g.id; render(); },
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
   'gig-chk': async ({ el, g }) => {

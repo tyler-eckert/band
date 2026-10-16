@@ -1,25 +1,30 @@
-Trailer Folk HQ - latest full set (rev 9, index.html loads app.js?v=15)
+Trailer Folk HQ - latest full set (rev 12, index.html loads app.js?v=18)
 
-FILES (all current):
-  index.html
-  app.js
-  supabase/01_schema.sql, 03_setlist_planner.sql, 04_setlists.sql   (your originals, unchanged)
-  supabase/02_seed.sql                                              (your data - do NOT commit to a public repo)
-  supabase/05_view_edit_checklist.sql                               load-in time + checklist columns
-  supabase/06_gig_photos.sql                                        gig photos + storage bucket
-  supabase/07_open_settings.sql                                     lets every member edit band settings
-  supabase/08_song_opener_closer.sql                                Opener?/Closer? flags on songs
-  supabase/09_song_encore.sql                                       NEW - Encore? flag on songs
-  supabase/functions/band-calendar/index.ts                         load-in start / +1hr end, no reminders
+PUSH TO GITHUB (repo root):
+  index.html, app.js
+  pdf.min.js, pdf.worker.min.js        NEW - the PDF viewer for gig mode (pdf.js 3.11.174, Apache-2.0; license in pdfjs-LICENSE.txt).
+                                       Optional: if they're missing the app falls back to cdnjs.cloudflare.com.
+
+RUN IN SUPABASE (SQL Editor; each is safe to re-run; 05 -> 11 in order if not done yet):
+  supabase/05_view_edit_checklist.sql   load-in time + checklist
+  supabase/06_gig_photos.sql            gig photos
+  supabase/07_open_settings.sql         members can edit band settings
+  supabase/08_song_opener_closer.sql    Opener?/Closer?
+  supabase/09_song_encore.sql           Encore?
+  supabase/10_song_charts.sql           personal PDF charts (tables + private storage bucket)
+  supabase/11_song_bpm.sql              NEW - BPM on songs
+  (01-04 and 02_seed.sql are your originals; the seed has your data - don't commit it to a public repo)
+
+REDEPLOY: supabase/functions/band-calendar/index.ts
 
 NOT INCLUDED (keep your existing copies): CNAME, assets/, vendor/
 
-Order: run any SQL you haven't run yet (05 to 09 - each is safe to re-run)
-       -> push index.html + app.js to GitHub -> redeploy band-calendar.
-
 Checksums:
-70e8ad503da3a515ecf81e893caf6541  ./app.js
-e99687e93f0af5e56eb4427ccbab436d  ./index.html
+901715c2ba49296de74d370b3233c5f7  ./app.js
+6a12b25f84bb448feb876e8fb916cbae  ./index.html
+96de323330f8b8336f637a0051835e00  ./pdf.min.js
+a53a71a2a5d618ed0f86ebf099db032a  ./pdf.worker.min.js
+2ee41112a44fe7014dce33e26468ba93  ./pdfjs-LICENSE.txt
 9e3c9acaba3374f07733b0146977da39  ./supabase/01_schema.sql
 3cb9a13c127a1ff46b289fef5c4b7e22  ./supabase/02_seed.sql
 3a55a92b09df5b3f80b3df697d27f1f0  ./supabase/03_setlist_planner.sql
@@ -29,4 +34,6 @@ c78fe2515b1c4e986e0f1038d2c71fde  ./supabase/05_view_edit_checklist.sql
 24e827b963c5eac2183981d21563a404  ./supabase/07_open_settings.sql
 5805cdebd45142c28a0dcd163cc5f521  ./supabase/08_song_opener_closer.sql
 6c36e77f63311370d51f9687c49ddd38  ./supabase/09_song_encore.sql
+5676b8eea6ee5a77a579355c0821d0d3  ./supabase/10_song_charts.sql
+07019cd84002c815d5d4e07aa3c5a5d9  ./supabase/11_song_bpm.sql
 c882d7f44d923c03007100fcad2aff43  ./supabase/functions/band-calendar/index.ts
