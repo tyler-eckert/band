@@ -526,7 +526,7 @@ function gigRead(g) {
   return `
   <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a></div>
   ${gigHead(g)}
-  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span><button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
+  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${!practice && L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold" data-act="gig-mode">▶ Gig mode</button>' : ''}<button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
   ${stepper}
   ${right ? `<div class="split"><div class="stack">${left}</div><div class="stack">${right}</div></div>` : `<div class="stack" style="max-width:820px">${left}</div>`}`;
 }
@@ -1880,7 +1880,7 @@ const ACTIONS = {
   'pl-export': ({ g }) => { const L = g && byId('setlists', g.id); if (L) openModal(exportModal(L)); },
   'exp-copy': ({ id }) => { const L = byId('setlists', id); if (L) copy(exportText(exportRows(L))); },
   'exp-csv': ({ id }) => { const L = byId('setlists', id); if (L) download(`Playlist - ${slName(L)}.csv`, exportCsv(exportRows(L)), 'text/csv'); },
-  'gig-mode': ({ g }) => { const L = g && byId('setlists', g.id); if (!L) return; openGigMode(gmSeq(L), L.id); },
+  'gig-mode': ({ g }) => { const L = g && (byId('setlists', g.id) || listOf(g.id)); if (!L) return toast('No setlist on this gig yet.', true); openGigMode(gmSeq(L), L.id); },   // works from a gig page or a setlist page
   'chart-open': ({ id }) => { const c = byId('song_charts', id); if (!c) return; openGigMode([{ item: {}, song: byId('songs', c.song_id), set: 1, forceChart: c }], null, { preview: true }); },
   'chart-use': async ({ el }) => {
     const sid = el.dataset.sid, m = el.dataset.m; if (!S.me) return;
