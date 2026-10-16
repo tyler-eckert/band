@@ -281,6 +281,7 @@ const keepUI = () => { try { localStorage.setItem('tfhq-ui', JSON.stringify(UI))
 
 function render() {
   document.body.classList.toggle('cb', !!UI.cb); document.body.classList.toggle('offline', !!S.offline);
+  document.body.style.setProperty('--hdr', (UI.hdr != null ? UI.hdr : 56) + 'px');
   document.body.style.setProperty('--tz', UI.tz != null ? UI.tz : (window.innerWidth >= 700 ? 1.12 : 1));
   const app = $('#app');
   if (!S.session) return app.innerHTML = loginView();
@@ -1325,6 +1326,7 @@ function settingsView() {
   return `${title('The Band')}
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
+    <label class="f" style="margin-top:14px;max-width:320px">Header position (iPad)<select class="in" data-hdr>${[[10, 'Snug'], [32, 'Medium'], [56, 'Low'], [80, 'Lowest']].map(([v, l]) => `<option value="${v}" ${(UI.hdr != null ? UI.hdr : 56) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:14px;max-width:320px">Text size<select class="in" data-text-size><option value="auto" ${UI.tz == null ? 'selected' : ''}>Auto (a bit larger on iPad)</option><option value="1" ${UI.tz === 1 ? 'selected' : ''}>Normal</option><option value="1.12" ${UI.tz === 1.12 ? 'selected' : ''}>Large</option><option value="1.25" ${UI.tz === 1.25 ? 'selected' : ''}>Extra large</option></select></label>
     ${(() => { if (!S.me) return ''; const cur = S.chart_defaults.find(d => d.member_id === S.me.id), ids = new Set(S.song_charts.filter(c => c.member_id !== S.me.id).map(c => c.member_id)); if (cur) ids.add(cur.use_member_id); const mine = S.song_charts.filter(c => c.member_id === S.me.id).length;
       return `<label class="f" style="margin-top:14px">When I don’t have my own chart for a song, use…<select class="in" data-chart-default><option value="">Nobody’s (leave it blank)</option>${[...ids].map(id => `<option value="${id}" ${cur && cur.use_member_id === id ? 'selected' : ''}>${esc((byId('members', id) || {}).name || 'Bandmate')}’s chart</option>`).join('')}</select></label><div class="small muted" style="margin-top:4px">You have ${mine} chart${mine === 1 ? '' : 's'} of your own. You can still pick a different chart song by song from the song’s page.</div>`; })()}
@@ -1796,6 +1798,8 @@ document.addEventListener('change', async e => {
   } else if (t.matches('[data-imp]')) {
     S._imp.rows[Number(t.dataset.imp)].songId = t.value; const n = S._imp.rows.filter(r => r.songId).length, b = $('[data-act="chart-import-go"]');
     if (b) { b.textContent = `Upload ${n} chart${n === 1 ? '' : 's'}`; b.disabled = !n; }
+  } else if (t.matches('[data-hdr]')) {
+    UI.hdr = Number(t.value); keepUI(); render();
   } else if (t.matches('[data-song-stars]')) {
     UI.songStars = t.value; keepUI(); render();
   } else if (t.matches('[data-text-size]')) {

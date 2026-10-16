@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Trailer Folk HQ</title>
-<meta name="theme-color" content="#140e02">
+<meta name="theme-color" content="#0e0a01">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">   <!-- opaque status bar: iPadOS's translucent glass over the top edge was smearing the header -->
 <meta name="apple-mobile-web-app-title" content="TF HQ">
 <link rel="icon" type="image/png" href="assets/icon.png">
 <link rel="apple-touch-icon" href="assets/icon.png">
@@ -84,7 +84,7 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .tabbar a{flex:1 1 0;min-width:0;max-width:200px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:8px 0 0;color:var(--muted);text-decoration:none;font-size:10.5px;font-weight:600;line-height:1}
 .tabbar a svg{width:22px;height:22px;display:block;flex:none}
 .tabbar a.on{color:var(--gold)}
-.sa-top{position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:#0e0a01;z-index:25}
+.sa-top{position:fixed;inset:0 0 auto;height:max(env(safe-area-inset-top,0px),8px);background:#0e0a01;z-index:25}   /* solid strip at the very top: also what Safari samples to tint its own bar */
 
 main{max-width:1240px;margin:0 auto;padding:28px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
 
@@ -354,7 +354,7 @@ body.offline [data-text-size]{pointer-events:auto;opacity:1}
 .ptr{position:fixed;left:50%;transform:translateX(-50%);z-index:60;background:var(--gold);color:#140e02;font-weight:700;font-size:13px;padding:7px 16px;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);pointer-events:none}
 main{padding-bottom:72px}
 /* iPad: header a little lower than the bare minimum, footer lower */
-@media (min-width:700px){ .top{padding-top:calc(env(safe-area-inset-top,0px) + 10px)} .tabbar{bottom:-20px;padding-bottom:22px} }
+@media (min-width:700px){ .top{padding-top:calc(env(safe-area-inset-top,0px) + var(--hdr,56px))} .tabbar{bottom:-20px;padding-bottom:22px} }
 </style>
 </head>
 <body>
@@ -362,6 +362,6 @@ main{padding-bottom:72px}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=24"></script>
+<script src="app.js?v=25"></script>
 </body>
 </html>
