@@ -348,7 +348,7 @@ function homeView() {
      </div></a>` : `<div class="next" style="margin-bottom:18px"><div><div class="eyebrow">Next up</div><div class="when">Nothing booked</div><div class="muted">Add a lead or a practice to get the calendar moving.</div></div></div>`}
   <section class="panel" style="margin-bottom:18px">
     <div class="row"><h2 class="sec" style="margin:0">Coming up</h2><span class="spacer"></span><span class="small muted">${up.length} scheduled</span></div>
-    <div class="list up-scroll" style="margin-top:8px">${up.map(gigLi).join('') || '<div class="empty">Nothing on the calendar.</div>'}</div>
+    <div class="list up-scroll" style="margin-top:8px">${up.map(g => gigLi(g, true)).join('') || '<div class="empty">Nothing on the calendar.</div>'}</div>
     ${addBtns(false)}
   </section>
   <section class="panel" style="margin-bottom:18px">
@@ -370,14 +370,19 @@ function homeView() {
 }
 const addBtns = (big, mt = '12px') => `<div class="row" style="margin:${mt} 0 ${big ? '14px' : '0'}"><button class="btn ${big ? '' : 'sm '}gold" data-act="new-gig">+ Gig / lead</button><button class="btn ${big ? '' : 'sm '}gold" data-act="new-practice">+ Practice</button></div>`;
 const kpi = (v, l, d) => `<div class="panel kpi"><div class="l">${l}</div><div class="v num">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
-function gigLi(g) {
+function untilText(date) {                                          // "Today", "Tomorrow", "5 days", "3 wks 2d"
+  const n = days(todayIso(), date); if (!date || n < 0) return '';
+  if (n === 0) return 'Today'; if (n === 1) return 'Tomorrow'; if (n < 7) return n + ' days';
+  const w = Math.floor(n / 7), r = n % 7; return `${w} wk${w === 1 ? '' : 's'}${r ? ' ' + r + 'd' : ''}`;
+}
+function gigLi(g, when) {
   const d = pd(g.gig_date);
   const amt = g.kind === 'practice' ? '' : g.status === 'complete' ? money(gross(g)) : g.quote ? money(g.quote) : '';
   return `<a class="li" href="#gig/${g.id}">
     <div class="date">${d ? `<small>${MON[d.getMonth()]}</small><b>${d.getDate()}</b><small>${String(d.getFullYear()).slice(2)}</small>` : '<small>TBD</small>'}</div>
     <div class="grow"><div class="t">${esc(g.kind === 'practice' ? 'Practice' : g.title)}</div>
       <div class="s">${[g.start_time, g.venue, g.kind === 'practice' ? g.notes : ''].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</div></div>
-    ${statusPill(g)}<div class="amt hide-sm" style="min-width:64px">${amt}</div></a>`;
+    ${when && g.gig_date ? `<div class="until" title="Weeks until">${untilText(g.gig_date)}</div>` : ''}${statusPill(g)}<div class="amt hide-sm" style="min-width:64px">${amt}</div></a>`;
 }
 
 /* ============================================================ gigs list */
@@ -526,7 +531,7 @@ function gigRead(g) {
   return `
   <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a></div>
   ${gigHead(g)}
-  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${!practice && L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold" data-act="gig-mode">▶ Gig mode</button>' : ''}<button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
+  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${!practice && L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode" title="Gig mode">&gt;&gt;</button>' : ''}<button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
   ${stepper}
   ${right ? `<div class="split"><div class="stack">${left}</div><div class="stack">${right}</div></div>` : `<div class="stack" style="max-width:820px">${left}</div>`}`;
 }
@@ -801,7 +806,7 @@ function setlistRead(id) {
   ].filter(Boolean);
   return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="back">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
   ${title(slName(L), `Setlist · ${items.length} songs · ${hm(total)} of music`)}
-  <div class="row" style="margin-bottom:14px"><button class="btn gold" data-act="gig-mode">▶ Gig mode</button><button class="btn" data-act="sl-edit">Edit</button><button class="btn" data-act="pl-export">Playlist export</button><button class="btn" data-act="set-pdf">Stage PDF</button><button class="btn" data-act="set-text">Copy as text</button></div>
+  <div class="row" style="margin-bottom:14px"><button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode" title="Gig mode">&gt;&gt;</button><button class="btn" data-act="sl-edit">Edit</button><button class="btn" data-act="pl-export">Playlist export</button><button class="btn" data-act="set-pdf">Stage PDF</button><button class="btn" data-act="set-text">Copy as text</button></div>
   <section class="panel" style="margin-bottom:14px"><div class="kv">${facts.join('')}</div>${L.notes ? `<p style="margin:14px 0 0;white-space:pre-wrap">${esc(L.notes)}</p>` : ''}</section>
   ${setlistSets(L, false)}`;
 }
@@ -1682,7 +1687,7 @@ async function gmWake() {
   try { if (navigator.wakeLock) { GM.lock = await navigator.wakeLock.request('screen'); GM.awake = true; GM.lock.addEventListener('release', () => { GM.awake = false; gmBadge(); }); } else GM.awake = false; } catch { GM.awake = false; }
   gmBadge();
 }
-function gmBadge() { const b = $('#gmAwake'); if (b) b.innerHTML = GM.awake ? '<span style="color:var(--ok)">● awake</span>' : '<span style="color:var(--gold)">⚠ may sleep</span>'; }
+function gmBadge() { const b = $('#gmAwake'); if (b) b.innerHTML = GM.awake ? '<span style="color:var(--ok)">● awake</span>' : '<span style="color:var(--gold)">may sleep</span>'; }
 function gmVis() { if (document.visibilityState === 'visible' && GM.open) gmWake(); }
 function gmKey(e) { if (!GM.open) return; if (e.key === 'ArrowRight') { e.preventDefault(); gmShow(GM.i + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); gmShow(GM.i - 1); } else if (e.key === 'Escape') closeGigMode(); }
 function gmClick(e) {
@@ -1719,10 +1724,10 @@ function gmBottom() {
     const alerts = brk ? [] : [...(c.tuning ? [`retune → ${esc(ns.tuning || 'Standard')}`] : []), ...c.inst.map(x => `${esc(x.who)}: ${esc(x.to)}`)];
     next = `<div class="gm-next"><span class="gm-lbl">${brk ? 'NEXT SET' : 'NEXT'}</span> <b>${esc(ns.title || '')}</b> <span class="gm-bits">${bits.join(' · ')}</span></div>${alerts.length ? `<div class="gm-alert">⇄ ${alerts.join(' · ')}</div>` : ''}`;
   }
-  return `<div class="gm-nav"><button class="gm-nb" data-gm="prev" ${GM.i ? '' : 'disabled'} aria-label="Previous song">◀</button>
+  return `<div class="gm-nav"><button class="gm-nb" data-gm="prev" ${GM.i ? '' : 'disabled'} aria-label="Previous song">&lt;&lt;</button>
     <div class="gm-info">${s.bpm || s.song_key ? `<div class="gm-now"><span class="gm-lbl">NOW</span> ${s.bpm ? `♩ <b>${s.bpm}</b> BPM` : ''}${s.bpm && s.song_key ? ' · ' : ''}${s.song_key ? 'Key ' + esc(s.song_key) + (s.capo ? ' · capo ' + s.capo : '') : ''}</div>` : ''}${say ? `<div class="gm-say">${esc(say)}</div>` : ''}${next}
 </div>
-    <button class="gm-nb" data-gm="next" ${nxt ? '' : 'disabled'} aria-label="Next song">▶</button></div>`;
+    <button class="gm-nb" data-gm="next" ${nxt ? '' : 'disabled'} aria-label="Next song">&gt;&gt;</button></div>`;
 }
 function gmNoChart(cur) {
   const s = cur.song || {};
