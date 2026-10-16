@@ -62,7 +62,7 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 /* ---------- top bar (press kit nav) ---------- */
 .top{position:sticky;top:0;z-index:20;display:flex;align-items:stretch;justify-content:space-between;gap:12px;
   padding:0 max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left));
-  padding-top:calc(env(safe-area-inset-top, 0px) + 4px);
+  padding-top:calc(env(safe-area-inset-top, 0px) + 22px);
   background:linear-gradient(180deg,rgba(14,10,1,.97),rgba(14,10,1,.88));backdrop-filter:blur(8px);border-bottom:1px solid var(--line-soft)}
 .brand{display:flex;align-items:center;gap:12px;text-decoration:none;padding:8px 0 6px}
 .brand img{height:44px;width:auto;display:block;overflow:visible}
@@ -274,6 +274,26 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
   .view{animation:rise .25s ease-out}
   @keyframes rise{from{transform:translateY(6px);opacity:.6}to{transform:none;opacity:1}}
 }
+/* ---------- key/value facts (gig & setlist view mode) ---------- */
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px 20px}
+.kv .v{font-size:17px;font-weight:600;margin-top:2px}
+.chk{display:flex;flex-direction:column}
+.chk .check{padding:11px 4px;border-top:1px solid var(--line-soft);font-size:14px}
+.chk .check:first-child{border-top:0}
+.chk .check input{width:20px;height:20px;flex:none}
+.cal.compact .day{min-height:64px}
+.cal-month{font-family:var(--display);font-stretch:112%;font-weight:800;color:var(--gold);font-size:17px;margin:18px 0 8px}
+.cal-month:first-child{margin-top:0}
+
+/* ---------- colorblind mode: blue/orange instead of green/red, plus shapes ---------- */
+body.cb{--ok:#4da3ff;--bad:#ff7a2f;--info:#a9c4e0}
+body.cb .st-quoted{color:#f0a6d3}
+body.cb .sev{border-radius:0}
+body.cb .sev.hi{width:11px;height:11px;margin-top:5px;clip-path:polygon(50% 0,100% 100%,0 100%)}
+body.cb .sev.md{width:8px;height:8px;margin-top:6px;transform:rotate(45deg)}
+body.cb .sev.lo{border-radius:50%}
+body.cb .bar i.over{background:repeating-linear-gradient(45deg,var(--bad) 0 4px,#ffd9bd 4px 8px)}
+body.cb .toast.err{background:var(--bad);color:#140e02}
 </style>
 </head>
 <body>
@@ -281,6 +301,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

@@ -126,7 +126,7 @@ const depositIn = g => g.deposit_received ? n0(g.deposit_amount) : 0;
 const pay = g => depositIn(g) + n0(g.paid);                                  // performance fee received
 const merchOf = g => n0(g.merch) + salesFor(g.id);
 const gross = g => pay(g) + n0(g.tips) + merchOf(g);
-const balanceDue = g => g.status === 'complete' && n0(g.quote) > 0 ? Math.max(0, n0(g.quote) - pay(g)) : 0;
+const balanceDue = g => g.status === 'complete' && !g.paid_in_full && n0(g.quote) > 0 ? Math.max(0, n0(g.quote) - pay(g)) : 0;
 const itemsOf = lid => S.setlist_items.filter(i => i.setlist_id === lid).sort((a, b) => a.set_no - b.set_no || a.position - b.position);
 const listOf = gid => S.setlists.find(l => l.gig_id === gid);
 const setItems = gid => { const l = listOf(gid); return l ? itemsOf(l.id) : []; };
@@ -162,10 +162,12 @@ function attention() {
     const d = g.gig_date;
     if (g.status === 'confirmed' && d && d < t) add('hi', g, `Played ${fmtDate(d)}? Mark it played and log pay, tips & merch.`, 'Wrap up');
     if (g.status === 'complete') {
-      if (n0(g.quote) > 0 && !g.invoice_no && balanceDue(g) > 0) add('hi', g, `No invoice sent — ${money(balanceDue(g))} still due.`, 'Invoice');
+      if (n0(g.quote) > 0 && !g.invoice_no && !g.invoice_sent && balanceDue(g) > 0) add('hi', g, `No invoice sent — ${money(balanceDue(g))} still due.`, 'Invoice');
       else if (g.invoiced_on && balanceDue(g) > 0 && days(g.invoiced_on, t) > terms) add('hi', g, `Invoice ${g.invoice_no} is ${days(g.invoiced_on, t) - terms} days past ${st.default_terms || 'NET30'} — ${money(balanceDue(g))} due.`, 'Follow up');
       else if (g.invoiced_on && balanceDue(g) > 0) add('lo', g, `Waiting on payment for ${g.invoice_no} (${money(balanceDue(g))}, due ${mdY(iso(new Date(pd(g.invoiced_on).getTime() + terms * 864e5)))}).`, 'Open');
     }
+    if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 30 && !g.paperwork_signed) add('md', g, 'Paperwork not signed yet.', 'Paperwork');
+    if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 7 && !g.details_sent) add('md', g, 'Gig-week details not sent to the client yet.', 'Details');
     if (g.status === 'confirmed' && n0(g.deposit_amount) > 0 && !g.deposit_received) add('md', g, `Deposit of ${money(g.deposit_amount)} not received yet.`, 'Deposit');
     if (['confirmed'].includes(g.status) && d && d >= t && days(t, d) <= (st.remind_setlist_days || 14) && !setItems(g.id).length) add(days(t, d) <= 5 ? 'hi' : 'md', g, `Gig in ${days(t, d)} days and no setlist yet.`, 'Build set');
     if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 21 && (!g.start_time || !g.venue || /tbd/i.test(g.venue || ''))) add('md', g, 'Missing start time or venue — lock in details with the client.', 'Details');
@@ -219,12 +221,16 @@ function shell(route, inner) {
 }
 const title = (t, sub) => `<h1 class="echo disp"><span class="solid">${esc(t)}</span><span class="ghost" aria-hidden="true">${esc(t)}</span></h1>${sub ? `<p class="muted" style="margin:-10px 0 22px">${sub}</p>` : ''}`;
 
+const titleSolid = (t, sub) => `<h1 class="echo disp"><span class="solid">${esc(t)}</span></h1>${sub ? `<p class="muted" style="margin:-10px 0 16px">${sub}</p>` : ''}`;
+const cbm = good => UI.cb ? (good ? '✓ ' : '▲ ') : '';
+
 /* ============================================================ router */
 let UI = { gigFilter: 'upcoming', gigSearch: '', gigYear: 'all', calMonth: null, songFilter: 'active', songSearch: '', songSort: 'title', moneyYear: String(new Date().getFullYear()), selSet: 1, libFilter: 'active', libSearch: '' };
 try { Object.assign(UI, JSON.parse(localStorage.getItem('tfhq-ui') || '{}')); } catch {}
 const keepUI = () => { try { localStorage.setItem('tfhq-ui', JSON.stringify(UI)); } catch {} };
 
 function render() {
+  document.body.classList.toggle('cb', !!UI.cb);
   const app = $('#app');
   if (!S.session) return app.innerHTML = loginView();
   if (!S.loaded) return app.innerHTML = shell('home', '<p class="muted">Loading the band book…</p>');
@@ -238,7 +244,7 @@ function render() {
   S._route = route;
   after(sec, id);
 }
-window.addEventListener('hashchange', () => { if (S.dirty && !confirmLeave()) return; render(); });
+window.addEventListener('hashchange', () => { if (S.dirty && !confirmLeave()) return; const rid = (location.hash || '').split('/')[1]; if (S.editGig && S.editGig !== rid) S.editGig = null; if (S.editSl && S.editSl !== rid) S.editSl = null; render(); });
 function confirmLeave() { S.dirty = false; return true; }
 
 /* ============================================================ login */
@@ -266,55 +272,47 @@ function notMemberView() {
 
 /* ============================================================ home */
 function homeView() {
-  const t = todayIso(), st = settings();
+  const t = todayIso();
   const up = upcoming();
   const next = up[0];
   const nextGig = up.find(g => g.kind === 'gig' && g.status === 'confirmed');
-  const lastGig = S.gigs.filter(g => isGig(g) && g.status === 'complete' && g.gig_date && g.gig_date <= t).sort((a, b) => b.gig_date.localeCompare(a.gig_date))[0];
-  const lastPrac = S.gigs.filter(g => g.kind === 'practice' && g.gig_date && g.gig_date <= t).sort((a, b) => b.gig_date.localeCompare(a.gig_date))[0];
-  const yr = new Date().getFullYear();
-  const played = S.gigs.filter(g => isGig(g) && g.status === 'complete' && yearOf(g.gig_date) === yr);
-  const grossY = played.reduce((a, g) => a + gross(g), 0);
-  const hrs = played.reduce((a, g) => a + n0(g.hours), 0);
-  const booked = S.gigs.filter(g => isGig(g) && g.status === 'confirmed' && g.gig_date >= t);
-  const pipeline = booked.reduce((a, g) => a + n0(g.quote), 0);
+  const lastGig = S.gigs.filter(g => isGig(g) && ['complete', 'confirmed'].includes(g.status) && g.gig_date && g.gig_date <= t).sort((a, b) => b.gig_date.localeCompare(a.gig_date))[0];
+  const yr = new Date().getFullYear(), md = t.slice(5);
+  const thru = (y, pick) => S.gigs.filter(g => pick(g) && g.gig_date && g.gig_date >= `${y}-01-01` && g.gig_date <= `${y}-${md}`).length;
+  const isPlayed = g => isGig(g) && ['complete', 'confirmed'].includes(g.status);
+  const isPrac = g => g.kind === 'practice';
+  const gNow = thru(yr, isPlayed), gPrev = thru(yr - 1, isPlayed), pNow = thru(yr, isPrac), pPrev = thru(yr - 1, isPrac);
+  const vs = (a, b) => `${a > b ? '▲ ' : a < b ? '▼ ' : ''}${b} at this point last year${a === b ? ' (even)' : ' (' + (a > b ? '+' : '−') + Math.abs(a - b) + ')'}`;
   const att = attention();
   const n = next ? days(t, next.gig_date) : null;
+  const nd = nextGig ? days(t, nextGig.gig_date) : null;
   return `
   ${next ? `<a class="next" href="#gig/${next.id}" style="text-decoration:none;color:inherit;margin-bottom:18px">
      <div><div class="eyebrow">${next.kind === 'practice' ? 'Next practice' : 'Next gig'}</div>
        <div class="when">${n === 0 ? 'Tonight' : n === 1 ? 'Tomorrow' : 'In ' + n + ' days'}</div>
        <div class="what">${esc(next.kind === 'practice' ? 'Practice' + (next.notes ? ' — ' + next.notes : '') : next.title)}</div>
-       <div class="muted">${fmtDate(next.gig_date, true)}${next.start_time ? ' · ' + esc(next.start_time) : ''}${next.venue ? ' · ' + esc(next.venue) : ''}</div>
+       <div class="muted">${fmtDate(next.gig_date, true)}${next.kind === 'gig' && next.load_in_time ? ' · Load-in ' + esc(next.load_in_time) : ''}${next.start_time ? ' · ' + (next.kind === 'gig' ? 'Start ' : '') + esc(next.start_time) : ''}${next.venue ? ' · ' + esc(next.venue) : ''}</div>
        ${next.kind === 'gig' ? `<div class="row" style="margin-top:12px">${statusPill(next)}<span class="small muted">${setItems(next.id).length ? setItems(next.id).length + ' songs on the setlist' : 'No setlist yet'}</span></div>` : ''}
      </div></a>` : `<div class="next" style="margin-bottom:18px"><div><div class="eyebrow">Next up</div><div class="when">Nothing booked</div><div class="muted">Add a lead or a practice to get the calendar moving.</div></div></div>`}
-  <div class="grid g4" style="margin-bottom:18px">
-    ${kpi(played.length, `Gigs played in ${yr}`, booked.length + ' more booked')}
-    ${kpi(money(grossY), `Gross ${yr}`, 'pay + tips + merch')}
-    ${kpi(hrs ? money(grossY / hrs) : '—', '$ per gig hour', `${yr}, all-in`)}
-    ${kpi(money(pipeline), 'Booked, not yet played', booked.length + ' gig' + (booked.length === 1 ? '' : 's'))}
-  </div>
-  <div class="split">
-    <section class="panel">
-      <div class="row"><h2 class="sec" style="margin:0">Needs attention</h2><span class="spacer"></span><span class="small muted">${att.length} item${att.length === 1 ? '' : 's'}</span></div>
-      <div class="list" style="margin-top:8px">${att.length ? att.slice(0, 14).map(a => `
-        <a class="li" href="${a.href || (a.act === 'Build set' ? (listOf(a.g.id) ? '#setlist/' + listOf(a.g.id).id : '#gig/' + a.g.id) : a.act === 'Add practice' ? '#calendar' : '#gig/' + a.g.id)}" style="align-items:flex-start">
-          <span class="sev ${a.sev}"></span>
-          <div class="grow"><div class="t">${a.g ? esc(a.g.title) : 'Band'}</div><div class="small muted" style="white-space:normal">${esc(a.text)}</div></div>
-          <span class="btn sm">${a.act}</span></a>`).join('') : '<div class="empty">All caught up. Nothing needs you right now.</div>'}
-      </div>
-    </section>
-    <div class="stack">
-      <section class="panel">
-        <h2 class="sec">Coming up</h2>
-        <div class="list">${up.slice(0, 6).map(gigLi).join('') || '<div class="empty">Nothing on the calendar.</div>'}</div>
-        <div class="row" style="margin-top:12px"><button class="btn sm gold" data-act="new-gig">+ Lead / gig</button><button class="btn sm" data-act="new-practice">+ Practice</button></div>
-      </section>
-      <section class="panel grid g2">
-        ${kpi(lastGig ? days(lastGig.gig_date, t) : '—', 'Days since last gig', lastGig ? esc(lastGig.title) : '')}
-        ${kpi(lastPrac ? days(lastPrac.gig_date, t) : '—', 'Days since practice', lastPrac ? fmtDate(lastPrac.gig_date) : '')}
-      </section>
+  <section class="panel" style="margin-bottom:18px">
+    <h2 class="sec">Coming up</h2>
+    <div class="list">${up.slice(0, 6).map(gigLi).join('') || '<div class="empty">Nothing on the calendar.</div>'}</div>
+    <div class="row" style="margin-top:12px"><button class="btn sm gold" data-act="new-gig">+ Lead / gig</button><button class="btn sm" data-act="new-practice">+ Practice</button></div>
+  </section>
+  <section class="panel" style="margin-bottom:18px">
+    <div class="row"><h2 class="sec" style="margin:0">Needs attention</h2><span class="spacer"></span><span class="small muted">${att.length} item${att.length === 1 ? '' : 's'}</span></div>
+    <div class="list" style="margin-top:8px">${att.length ? att.slice(0, 14).map(a => `
+      <a class="li" href="${a.href || (a.act === 'Build set' ? (listOf(a.g.id) ? '#setlist/' + listOf(a.g.id).id : '#gig/' + a.g.id) : a.act === 'Add practice' ? '#calendar' : '#gig/' + a.g.id)}" style="align-items:flex-start">
+        <span class="sev ${a.sev}"></span>
+        <div class="grow"><div class="t">${a.g ? esc(a.g.title) : 'Band'}</div><div class="small muted" style="white-space:normal">${esc(a.text)}</div></div>
+        <span class="btn sm">${a.act}</span></a>`).join('') : '<div class="empty">All caught up. Nothing needs you right now.</div>'}
     </div>
+  </section>
+  <div class="grid g4">
+    ${kpi(gNow, `Gigs played in ${yr}`, vs(gNow, gPrev))}
+    ${kpi(pNow, `Practices in ${yr}`, vs(pNow, pPrev))}
+    ${kpi(nd == null ? '—' : nd, 'Days until next gig', nextGig ? esc(nextGig.title) + ' · ' + mdY(nextGig.gig_date) : 'No gig booked')}
+    ${kpi(lastGig ? days(lastGig.gig_date, t) : '—', 'Days since last gig', lastGig ? esc(lastGig.title) + ' · ' + mdY(lastGig.gig_date) : '')}
   </div>`;
 }
 const kpi = (v, l, d) => `<div class="panel kpi"><div class="l">${l}</div><div class="v num">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
@@ -362,14 +360,78 @@ function gigsView() {
 function gigView(id) {
   const g = byId('gigs', id);
   if (!g) return `${title('Not found')}<p class="muted">That gig may have been deleted. <a href="#gigs">Back to gigs</a></p>`;
+  return S.editGig === id ? gigEdit(g) : gigRead(g);
+}
+const CHECKS = [['deposit_received', 'Deposit received'], ['paperwork_signed', 'Paperwork signed'], ['invoice_sent', 'Invoice sent'], ['paid_in_full', 'Paid in full'], ['details_sent', 'Gig details sent to client']];
+function checklistPanel(g) {
+  const hint = { deposit_received: n0(g.deposit_amount) ? money(g.deposit_amount) + (g.deposit_received_on ? ' · ' + mdY(g.deposit_received_on) : '') : '', invoice_sent: g.invoice_no || '', paid_in_full: g.paid_in_full && g.paid_on ? mdY(g.paid_on) : '' };
+  return `<section class="panel"><h2 class="sec">Checklist</h2><div class="chk">${CHECKS.map(([k, l]) => `
+    <label class="check"><input type="checkbox" data-act="gig-chk" data-k="${k}" ${g[k] ? 'checked' : ''}><span>${l}</span><span class="small faint" style="margin-left:auto">${esc(hint[k] || '')}</span></label>`).join('')}</div></section>`;
+}
+/* read-only sets with clock times — used on the gig page and the setlist page */
+function setlistSets(L, compact) {
+  const g = slCtx(L), items = itemsOf(L.id).filter(i => i.played), plan = planOf(g), buf = plan.buf;
+  if (!items.length) return '<p class="muted" style="margin:0">No songs on the setlist yet.</p>';
+  const sets = Array.from({ length: plan.sets }, (_, i) => i + 1);
+  const dur = {}; sets.forEach(n => dur[n] = items.filter(i => i.set_no === n).reduce((a, i) => a + songDur(byId('songs', i.song_id), buf), 0));
+  const ros = runOfShow(g, plan, Object.fromEntries(sets.map(n => [n, dur[n] || plan.perSet])));
+  return `<div class="sets">${sets.filter(n => dur[n]).map(n => {
+    const its = items.filter(i => i.set_no === n), slot = ros.find(r => r.kind === 'set' && r.n === n), brk = ros[ros.indexOf(slot) + 1];
+    let prev = null;
+    return `<section class="panel set"><div class="row"><h3>Set ${n}</h3>${slot && slot.from ? `<span class="small muted">${slot.from}–${slot.to}</span>` : ''}<span class="spacer"></span><span class="small muted num">${hm(dur[n])}</span></div>
+      ${its.map((i, k) => { const s = byId('songs', i.song_id) || { title: '(deleted song)' }; const c = changes(prev, s); prev = s;
+        const warn = compact ? '' : [c.tuning ? `<span style="color:var(--bad)">${cbm(false)}retune → ${esc(s.tuning || 'Standard')}</span>` : '', ...c.inst.map(x => `<span style="color:var(--gold)">${esc(x.who)}: ${esc(x.to)}</span>`)].filter(Boolean).join(' · ');
+        return `<div class="song"><span class="n">${k + 1}</span><div style="min-width:0"><div class="nm">${esc(s.title)}</div>
+          <div class="meta">${esc(songLabel(s))}${compact ? '' : ' · ' + mins(s.length_min) + (s.lead_vox ? ' · ' + esc(s.lead_vox) : '')}</div>${warn ? `<div class="meta">⇄ ${warn}</div>` : ''}</div><span></span></div>`; }).join('')}
+      ${brk && brk.kind === 'break' && n < plan.sets ? `<div class="small muted" style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">Break · ${brk.dur} min${brk.from ? ` · ${brk.from}–${brk.to}` : ''}</div>` : ''}
+    </section>`; }).join('')}</div>`;
+}
+function gigRead(g) {
+  const st = settings(), c = clientOf(g) || {}, practice = g.kind === 'practice', mgr = isMgr(), L = listOf(g.id);
+  const tbd = '<span class="faint">TBD</span>';
+  const kv = (l, v) => `<div><div class="eyebrow">${l}</div><div class="v num">${v}</div></div>`;
+  const mapUrl = (g.venue || g.address) ? 'https://maps.apple.com/?q=' + encodeURIComponent([g.venue, g.address].filter(Boolean).join(', ')) : '';
+  const stepper = practice || !mgr ? '' : `<div class="chips" style="margin-bottom:14px">${STATUSES.map(s => `<button class="chip ${g.status === s ? 'on' : ''}" data-act="set-status" data-v="${s}">${STATUS_LABEL[s]}</button>`).join('')}</div>`;
+  const facts = practice
+    ? [kv('Date', esc(fmtDate(g.gig_date))), kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd), kv('Where', g.venue ? esc(g.venue) : tbd)]
+    : [kv('Date', esc(fmtDate(g.gig_date))), kv('Load-in', g.load_in_time ? esc(g.load_in_time) : tbd), kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd),
+       kv('Venue', g.venue ? esc(g.venue) : tbd), g.address ? kv('Address', `<a href="${mapUrl}" target="_blank" rel="noopener">${esc(g.address)}</a>`) : ''];
+  const setlistPanel = practice ? '' : `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Setlist</h2><span class="spacer"></span>${L ? `<a class="btn sm gold" href="#setlist/${L.id}">Open setlist</a>` : (mgr ? `<button class="btn sm gold" data-act="sl-new" data-gig="${g.id}">New setlist</button>` : '')}</div>
+      <div style="margin-top:12px">${L ? setlistSets(L, true) : `<p class="muted" style="margin:0">${g.songs_played_legacy ? g.songs_played_legacy + ' songs played (count from the old sheet).' : 'No setlist yet.'}</p>`}</div></section>`;
+  const left = `<section class="panel"><h2 class="sec">Details</h2><div class="kv">${facts.join('')}</div></section>
+    ${g.notes ? `<section class="panel"><h2 class="sec">${practice ? 'Plan' : 'Notes'}</h2><p style="margin:0;white-space:pre-wrap">${esc(g.notes)}</p></section>` : ''}
+    ${setlistPanel}`;
+  const money_rows = [['Quote', g.quote != null ? money(g.quote) : ''], ['Deposit', n0(g.deposit_amount) ? money(g.deposit_amount) + (g.deposit_received ? ' · received' : ' · owed') : ''], ['Paid (less deposit)', g.paid != null ? money(g.paid) : ''], ['Tips', n0(g.tips) ? money(g.tips) : ''], ['Merch', merchOf(g) ? money(merchOf(g)) : '']].filter(r => r[1]);
+  const right = practice || !mgr ? '' : `
+    ${checklistPanel(g)}
+    <section class="panel"><h2 class="sec">Money</h2>
+      ${money_rows.length ? `<table class="tbl"><tbody>${money_rows.map(([l, v]) => `<tr><td>${l}</td><td class="r num">${v}</td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">No quote yet.</p>'}
+      <div class="row" style="margin-top:12px;gap:18px"><div><div class="eyebrow">Gross</div><div class="num" style="font-size:20px;font-weight:700">${money(gross(g))}</div></div>
+        <div><div class="eyebrow">Balance due</div><div class="num" style="font-size:20px;font-weight:700;color:${balanceDue(g) ? 'var(--gold)' : 'inherit'}">${money(balanceDue(g))}</div></div></div></section>
+    ${(c.contact_name || c.org || c.email || c.phone) ? `<section class="panel"><h2 class="sec">Client</h2><div><b>${esc(c.contact_name || c.org)}</b>${c.contact_name && c.org ? `<div class="muted">${esc(c.org)}</div>` : ''}</div>
+      <div class="small" style="margin-top:6px">${c.email ? `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a><br>` : ''}${c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : ''}</div></section>` : ''}
+    <section class="panel"><h2 class="sec">Paperwork</h2><div class="stack">
+      <div class="row"><div class="grow"><b>Quote</b><div class="small muted">${g.quote_no ? esc(g.quote_no) + ' · sent ' + mdY(g.quoted_on) : 'Not sent yet'}</div></div><button class="btn sm gold" data-act="pdf" data-v="quote">Quote PDF</button></div>
+      <div class="row"><div class="grow"><b>Invoice</b><div class="small muted">${g.invoice_no ? esc(g.invoice_no) + ' · ' + mdY(g.invoiced_on) : 'Not invoiced yet'}</div></div><button class="btn sm gold" data-act="pdf" data-v="invoice">Invoice PDF</button></div>
+      <div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="mail" data-v="quote">Quote email</button><button class="btn sm" data-act="mail" data-v="deposit">Deposit reminder</button><button class="btn sm" data-act="mail" data-v="details">Gig-week details</button><button class="btn sm" data-act="mail" data-v="invoice">Invoice email</button><button class="btn sm" data-act="mail" data-v="thanks">Thank-you</button></div>
+    </div></section>
+    ${g.status === 'complete' ? payoutPanel(g) : ''}`;
+  return `
+  <div class="row" style="margin-bottom:6px"><a href="#gigs" class="small">← Gigs</a></div>
+  ${titleSolid(practice ? 'Practice' : g.title, esc(fmtDate(g.gig_date, true)))}
+  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span><button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
+  ${stepper}
+  ${right ? `<div class="split"><div class="stack">${left}</div><div class="stack">${right}</div></div>` : `<div class="stack" style="max-width:820px">${left}</div>`}`;
+}
+function gigEdit(g) {
   const st = settings(), c = clientOf(g) || {}, practice = g.kind === 'practice';
   const items = setItems(g.id);
   const f = (key, label, type = 'text', cls = '', extra = '') => `<label class="f ${cls}">${label}<input class="in" data-f="${key}" type="${type}" value="${esc(g[key] ?? '')}" ${type === 'number' ? 'step="any" inputmode="decimal"' : ''} ${extra}></label>`;
   const stepper = practice ? '' : `<div class="chips" style="margin-bottom:6px">${STATUSES.map(s => `<button class="chip ${g.status === s ? 'on' : ''}" data-act="set-status" data-v="${s}">${STATUS_LABEL[s]}</button>`).join('')}</div>`;
   const totalDur = items.reduce((a, i) => a + n0((byId('songs', i.song_id) || {}).length_min), 0);
   return `
-  <div class="row" style="margin-bottom:6px"><a href="#gigs" class="small">← Gigs</a></div>
-  ${title(practice ? 'Practice' : g.title, `${fmtDate(g.gig_date, true)}${g.start_time ? ' · ' + esc(g.start_time) : ''}${g.venue ? ' · ' + esc(g.venue) : ''}`)}
+  <div class="row" style="margin-bottom:6px"><a href="#gigs" class="small">← Gigs</a><span class="spacer"></span><span class="pill st-confirmed">Editing</span></div>
+  ${titleSolid(practice ? 'Practice' : g.title, `${fmtDate(g.gig_date, true)}${g.start_time ? ' · ' + esc(g.start_time) : ''}${g.venue ? ' · ' + esc(g.venue) : ''}`)}
   <div class="row">${stepper}<span class="spacer"></span><button class="btn sm ghost" data-act="fold-all" data-v="1">Expand all</button><button class="btn sm ghost" data-act="fold-all" data-v="0">Collapse all</button></div>
   <div class="split" style="margin-top:14px">
    <div class="stack">
@@ -377,13 +439,15 @@ function gigView(id) {
       <div class="fgrid">
         ${practice ? '' : f('title', 'Name', 'text', 'w2')}
         ${f('gig_date', 'Date', 'date')}
+        ${practice ? '' : f('load_in_time', 'Load-in', 'text', '', 'placeholder="4:30pm"')}
         ${f('start_time', 'Start', 'text', '', 'placeholder="7pm"')}
         ${practice ? f('end_time', 'End') : f('end_time', 'End', 'text', '', 'placeholder="9pm"')}
-        ${f('venue', practice ? 'Where' : 'Venue', 'text', practice ? 'w2' : 'w2')}
-        ${practice ? '' : f('address', 'Address', 'text', 'w2')}
+        ${f('venue', practice ? 'Where' : 'Venue', 'text', 'w2')}
+        ${practice ? '' : f('address', 'Address', 'text', 'w4')}
         <label class="f w4">${practice ? 'Plan' : 'Notes'}<textarea class="in" data-f="notes">${esc(g.notes || '')}</textarea></label>
       </div>
     </div></details>
+    ${practice ? '' : checklistPanel(g)}
     ${practice ? '' : `
     <details class="panel fold" data-fold="client" ${foldOpen('client')}><summary><h2 class="sec">Client</h2><span class="sum">${esc([c.contact_name, c.org].filter(Boolean).join(' — ') || 'No client yet')}</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
       <div class="fgrid">
@@ -401,7 +465,6 @@ function gigView(id) {
       <div class="fgrid">
         ${f('quote', 'Quote $', 'number')}${f('hours', 'Hours', 'number')}
         ${f('deposit_amount', 'Deposit $', 'number')}
-        <label class="f">Deposit in<span class="check" style="padding:9px 0"><input type="checkbox" data-f="deposit_received" ${g.deposit_received ? 'checked' : ''}> Received</span></label>
         ${f('paid', 'Paid (less deposit) $', 'number')}${f('paid_on', 'Paid on', 'date')}
         ${f('tips', 'Tips $', 'number')}${f('merch', 'Merch $', 'number')}
         <label class="f w2">Pay to<select class="in" data-f="payee_id">${S.payees.map(p => `<option value="${p.id}" ${p.id === payeeOf(g).id ? 'selected' : ''}>${esc(p.name)}${p.org ? ' — ' + esc(p.org) : ''}</option>`).join('')}</select></label>
@@ -414,7 +477,7 @@ function gigView(id) {
         ${expensesFor(g.id) ? `<div><div class="eyebrow">Expenses</div><div class="num" style="font-size:20px;font-weight:700">${money(expensesFor(g.id), true)}</div></div>` : ''}
       </div>
     </div></details>`}
-    <div class="row"><button class="btn gold" data-act="save-gig">Save changes</button><span id="dirtyNote" class="small muted"></span><span class="spacer"></span>
+    <div class="row"><button class="btn gold" data-act="save-gig">Save changes</button><button class="btn" data-act="gig-view">Cancel</button><span id="dirtyNote" class="small muted"></span><span class="spacer"></span>
       <span id="delWrap"><button class="btn danger sm" data-act="del-gig-ask">Delete</button></span></div>
    </div>
    <div class="stack">
@@ -464,38 +527,45 @@ function payoutPanel(g) {
 /* ============================================================ calendar */
 function calendarView() {
   const base = UI.calMonth ? pd(UI.calMonth + '-01') : new Date(today().getFullYear(), today().getMonth(), 1);
-  const y = base.getFullYear(), m = base.getMonth();
-  const start = new Date(y, m, 1 - new Date(y, m, 1).getDay());
+  const three = UI.calSpan === '3mo', nMonths = three ? 3 : 1;
   const t = todayIso(), st = settings();
   const byDay = {};
   S.gigs.forEach(g => { if (g.gig_date) (byDay[g.gig_date] = byDay[g.gig_date] || []).push(g); });
-  const cells = [];
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(start); d.setDate(start.getDate() + i); const k = iso(d);
-    if (i >= 35 && d.getMonth() !== m) break;
-    const evs = (byDay[k] || []).map(g => {
-      const cls = g.kind === 'practice' ? 'practice' : ['passed','cancelled'].includes(g.status) ? 'dead' : ['inquiry','quoted'].includes(g.status) ? 'lead' : 'gig';
-      return `<a class="ev ${cls}" href="#gig/${g.id}" title="${esc(g.title)}"><span>${esc(g.start_time ? g.start_time + ' ' : '')}${esc(g.kind === 'practice' ? 'Practice' : g.title)}</span></a>`;
-    }).join('');
-    cells.push(`<div class="day ${d.getMonth() !== m ? 'out' : ''} ${k === t ? 'today' : ''}"><span class="dn">${d.getDate()}</span>${evs}</div>`);
-  }
+  const monthGrid = (y, m) => {
+    const start = new Date(y, m, 1 - new Date(y, m, 1).getDay()), cells = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i); const k = iso(d);
+      if (i >= 35 && d.getMonth() !== m) break;
+      const evs = (byDay[k] || []).map(g => {
+        const cls = g.kind === 'practice' ? 'practice' : ['passed','cancelled'].includes(g.status) ? 'dead' : ['inquiry','quoted'].includes(g.status) ? 'lead' : 'gig';
+        return `<a class="ev ${cls}" href="#gig/${g.id}" title="${esc(g.title)}"><span>${esc(g.start_time ? g.start_time + ' ' : '')}${esc(g.kind === 'practice' ? 'Practice' : g.title)}</span></a>`;
+      }).join('');
+      cells.push(`<div class="day ${d.getMonth() !== m ? 'out' : ''} ${k === t ? 'today' : ''}"><span class="dn">${d.getDate()}</span>${evs}</div>`);
+    }
+    return `<div class="cal ${three ? 'compact' : ''}">${DOW.map(d => `<div class="dow">${d}</div>`).join('')}${cells.join('')}</div>`;
+  };
+  const months = Array.from({ length: nMonths }, (_, i) => new Date(base.getFullYear(), base.getMonth() + i, 1));
+  const last = months[months.length - 1];
+  const rangeFrom = iso(months[0]), rangeTo = iso(new Date(last.getFullYear(), last.getMonth() + 1, 0));
+  const label = three ? `${months[0].toLocaleDateString('en-US', { month: 'short' })} – ${last.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}` : base.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const feed = `${SUPABASE_URL.replace('.supabase.co', '.functions.supabase.co')}/${CAL_FUNCTION}?token=${st.ics_token || ''}`;
-  const monthList = S.gigs.filter(g => g.gig_date && yearOf(g.gig_date) === y && pd(g.gig_date).getMonth() === m).sort((a, b) => a.gig_date.localeCompare(b.gig_date));
+  const rangeList = S.gigs.filter(g => g.gig_date && g.gig_date >= rangeFrom && g.gig_date <= rangeTo).sort((a, b) => a.gig_date.localeCompare(b.gig_date));
   return `${title('Calendar')}
    <div class="row" style="margin-bottom:12px">
      <button class="btn sm" data-act="cal-move" data-v="-1">←</button>
-     <b class="disp" style="font-size:20px;color:var(--gold);min-width:210px;text-align:center">${base.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</b>
+     <b class="disp" style="font-size:20px;color:var(--gold);min-width:210px;text-align:center">${label}</b>
      <button class="btn sm" data-act="cal-move" data-v="1">→</button>
      <button class="btn sm ghost" data-act="cal-move" data-v="0">Today</button>
      <span class="spacer"></span>
-     <div class="legend"><span><i style="background:var(--gold)"></i>Booked / played</span><span><i style="background:var(--info)"></i>Lead</span><span><i style="background:var(--muted)"></i>Practice</span></div>
+     <div class="chips"><button class="chip ${three ? '' : 'on'}" data-act="cal-span" data-v="month">Month</button><button class="chip ${three ? 'on' : ''}" data-act="cal-span" data-v="3mo">3 months</button></div>
    </div>
-   <section class="panel" style="padding:10px"><div class="cal">${DOW.map(d => `<div class="dow">${d}</div>`).join('')}${cells.join('')}</div></section>
+   <div class="legend" style="margin-bottom:10px"><span><i style="background:var(--gold)"></i>Booked / played</span><span><i style="background:var(--info)"></i>Lead</span><span><i style="background:var(--muted)"></i>Practice</span></div>
+   <section class="panel" style="padding:10px">${months.map(d => `${three ? `<div class="cal-month">${d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>` : ''}${monthGrid(d.getFullYear(), d.getMonth())}`).join('')}</section>
    <div class="split" style="margin-top:16px">
-     <section class="panel"><h2 class="sec">This month</h2><div class="list">${monthList.map(gigLi).join('') || '<div class="empty">Nothing this month.</div>'}</div>
+     <section class="panel"><h2 class="sec">${three ? 'Next 3 months' : 'This month'}</h2><div class="list">${rangeList.map(gigLi).join('') || `<div class="empty">Nothing ${three ? 'in these months' : 'this month'}.</div>`}</div>
        <div class="row" style="margin-top:12px"><button class="btn sm gold" data-act="new-gig">+ Lead / gig</button><button class="btn sm" data-act="new-practice">+ Practice</button></div></section>
      <section class="panel"><h2 class="sec">Sync to your phone</h2>
-       <p class="small muted" style="margin-top:0">Subscribe once and every gig and practice shows up in your own calendar, with reminders the day before and two hours before. Updates flow in automatically (Apple refreshes about hourly; Google can take up to a day).</p>
+       <p class="small muted" style="margin-top:0">Subscribe once and every gig and practice shows up in your own calendar. Gigs start at load-in and run until an hour after the show ends, with reminders the day before and two hours before. Updates flow in automatically (Apple refreshes about hourly; Google can take up to a day).</p>
        <label class="f">Calendar feed URL<input class="in" readonly value="${esc(feed)}" id="feedUrl"></label>
        <div class="row" style="margin-top:10px"><button class="btn sm gold" data-act="copy-feed">Copy URL</button><a class="btn sm" href="${esc(feed.replace(/^https:/, 'webcal:'))}">Open in Apple Calendar</a><button class="btn sm" data-act="ics-all">Download .ics instead</button></div>
        <p class="small faint">Google Calendar: Other calendars → + → From URL → paste. Anyone with this link can read the schedule${isMgr() ? '; <a href="#" data-act="rotate-token">reset the link</a> if it gets shared too widely' : ''}.</p>
@@ -578,15 +648,38 @@ function flowStats(setsSongs) {
   return r;
 }
 const flowChips = (f) => `<div class="chips small">
-  <span class="pill" style="color:${f.inst ? 'var(--gold)' : 'var(--ok)'}">${f.inst} instrument swap${f.inst === 1 ? '' : 's'}</span>
-  <span class="pill" style="color:${f.tuning ? 'var(--bad)' : 'var(--ok)'}">${f.tuning} retune${f.tuning === 1 ? '' : 's'} in a set</span>
-  <span class="pill" style="color:${f.sameKey ? 'var(--gold)' : 'var(--ok)'}">${f.sameKey} same-key pair${f.sameKey === 1 ? '' : 's'}</span>
-  <span class="pill" style="color:${f.voxRuns ? 'var(--gold)' : 'var(--ok)'}">${f.voxRuns} 3-in-a-row singer</span>
-  <span class="pill" style="color:${f.genreRuns ? 'var(--gold)' : 'var(--ok)'}">${f.genreRuns} 3-in-a-row genre</span></div>`;
+  <span class="pill" style="color:${f.inst ? 'var(--gold)' : 'var(--ok)'}">${cbm(!f.inst)}${f.inst} instrument swap${f.inst === 1 ? '' : 's'}</span>
+  <span class="pill" style="color:${f.tuning ? 'var(--bad)' : 'var(--ok)'}">${cbm(!f.tuning)}${f.tuning} retune${f.tuning === 1 ? '' : 's'} in a set</span>
+  <span class="pill" style="color:${f.sameKey ? 'var(--gold)' : 'var(--ok)'}">${cbm(!f.sameKey)}${f.sameKey} same-key pair${f.sameKey === 1 ? '' : 's'}</span>
+  <span class="pill" style="color:${f.voxRuns ? 'var(--gold)' : 'var(--ok)'}">${cbm(!f.voxRuns)}${f.voxRuns} 3-in-a-row singer</span>
+  <span class="pill" style="color:${f.genreRuns ? 'var(--gold)' : 'var(--ok)'}">${cbm(!f.genreRuns)}${f.genreRuns} 3-in-a-row genre</span></div>`;
 
 function setlistView(id) {
   const L = byId('setlists', id);
   if (!L) return `${title('Not found')}<p class="muted">That setlist may have been deleted. <a href="#setlists">Back to setlists</a></p>`;
+  return S.editSl === id ? setlistEdit(id) : setlistRead(id);
+}
+function setlistRead(id) {
+  const L = byId('setlists', id), gig = gigOf(L), g = slCtx(L), items = itemsOf(id).filter(i => i.played), plan = planOf(g);
+  const total = items.reduce((a, i) => a + n0((byId('songs', i.song_id) || {}).length_min), 0);
+  const tbd = '<span class="faint">TBD</span>';
+  const kv = (l, v) => `<div><div class="eyebrow">${l}</div><div class="v num">${v}</div></div>`;
+  const facts = [
+    gig ? kv('Gig', `<a href="#gig/${gig.id}">${esc(gig.title)}</a>`) : kv('Gig', '<span class="muted">Not assigned</span>'),
+    gig ? kv('Date', esc(fmtDate(gig.gig_date))) : '',
+    gig && gig.kind === 'gig' ? kv('Load-in', gig.load_in_time ? esc(gig.load_in_time) : tbd) : '',
+    kv('Start', g.start_time ? esc(g.start_time) : tbd),
+    kv('Sets', `${plan.sets}${plan.breaks ? ` · ${plan.breaks} break${plan.breaks === 1 ? '' : 's'} (${plan.breakMin} min)` : ''}`),
+    g.hours ? kv('Slot', hm(n0(g.hours) * 60)) : '',
+  ].filter(Boolean);
+  return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="small">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
+  ${title(slName(L), `Setlist · ${items.length} songs · ${hm(total)} of music`)}
+  <div class="row" style="margin-bottom:14px"><button class="btn gold" data-act="sl-edit">Edit</button><button class="btn" data-act="set-pdf">Stage PDF</button><button class="btn" data-act="set-text">Copy as text</button></div>
+  <section class="panel" style="margin-bottom:14px"><div class="kv">${facts.join('')}</div>${L.notes ? `<p style="margin:14px 0 0;white-space:pre-wrap">${esc(L.notes)}</p>` : ''}</section>
+  ${setlistSets(L, false)}`;
+}
+function setlistEdit(id) {
+  const L = byId('setlists', id);
   const gig = gigOf(L), g = slCtx(L);
   const items = itemsOf(id), plan = planOf(g), buf = plan.buf;
   const sets = Array.from({ length: plan.sets }, (_, i) => i + 1);
@@ -602,7 +695,7 @@ function setlistView(id) {
     const brk = ros[ros.indexOf(slot) + 1];
     let prev = null;
     return `<section class="panel set ${UI.selSet === n ? 'sel' : ''}" data-act="sel-set" data-v="${n}">
-      <div class="row"><h3>Set ${n}</h3>${slot && slot.from ? `<span class="small muted">${slot.from}–${slot.to}</span>` : ''}<span class="spacer"></span><span class="small num" style="color:${over ? 'var(--bad)' : dur < target - 5 ? 'var(--muted)' : 'var(--ok)'}">${hm(dur)} / ${hm(target)}</span></div>
+      <div class="row"><h3>Set ${n}</h3>${slot && slot.from ? `<span class="small muted">${slot.from}–${slot.to}</span>` : ''}<span class="spacer"></span><span class="small num" style="color:${over ? 'var(--bad)' : dur < target - 5 ? 'var(--muted)' : 'var(--ok)'}">${over ? cbm(false) : ''}${hm(dur)} / ${hm(target)}${over ? ' over' : ''}</span></div>
       <div class="bar"><i class="${over ? 'over' : ''}" style="width:${Math.min(100, dur / Math.max(target, 1) * 100)}%"></i></div>
       ${its.map((i, k) => { const s = byId('songs', i.song_id) || { title: '(deleted song)' }; const c = i.played ? changes(prev, s) : changes(null, null); if (i.played) prev = s;
         const warn = [c.tuning ? `<span style="color:var(--bad)">retune → ${esc(s.tuning || 'Standard')}</span>` : '', ...c.inst.map(x => `<span style="color:var(--gold)">${esc(x.who)}: ${esc(x.to)}</span>`)].filter(Boolean).join(' · ');
@@ -633,6 +726,7 @@ function setlistView(id) {
   const pf = (k, l, v, extra = '') => `<label class="f">${l}<input class="in" type="number" min="0" step="any" data-plan="${k}" value="${esc(v ?? '')}" ${extra}></label>`;
   return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="small">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
   ${title(slName(L), `Setlist · ${items.length} songs · ${hm(total)} of music`)}
+  <div class="row" style="margin-bottom:14px"><span class="pill st-confirmed">Editing</span><span class="spacer"></span><button class="btn gold" data-act="sl-view">Done</button></div>
   <section class="panel" style="margin-bottom:14px">
     <div class="row" style="align-items:flex-end;gap:12px">
       <label class="f grow" style="min-width:200px">Setlist name<input class="in" id="slName" value="${esc(L.name || '')}" placeholder="${esc(gig ? gig.title : 'e.g. Wedding — 2 × 60')}"></label>
@@ -671,7 +765,7 @@ function setlistView(id) {
   </div>
   <div class="split">
     <div class="sets">${setCards}</div>
-    <section class="panel" style="position:sticky;top:90px">
+    <section class="panel" style="position:sticky;top:116px">
       <div class="row"><h2 class="sec" style="margin:0">Song book</h2><span class="spacer"></span><span class="small muted">adds to Set ${UI.selSet}</span></div>
       <div class="row" style="margin:10px 0"><input class="in" id="libSearch" placeholder="Search songs or genre" value="${esc(UI.libSearch)}">
         <div class="chips">${[['active','Active'],['bench','Bench'],['holiday','Holiday'],['all','All']].map(([k, l]) => `<button class="chip ${UI.libFilter === k ? 'on' : ''}" data-act="lib-filter" data-v="${k}">${l}</button>`).join('')}</div></div>
@@ -971,6 +1065,9 @@ function settingsView() {
   const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
   const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}" ${mgr ? '' : 'disabled'}></label>`;
   return `${title('The Band')}
+  <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
+    <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
+  </section>
   <section class="team" style="margin-bottom:18px">${ms.filter(m => m.active).map(m => `<div class="mate"><img src="${photo(m)}" alt="${esc(m.name)}"><div class="plate"><small>${esc(m.instrument || '')}</small>${esc(m.name)}</div></div>`).join('')}</section>
   <div class="grid g2">
     <section class="panel"><h2 class="sec">Roster & logins</h2>
@@ -1133,20 +1230,31 @@ async function stagePdf(g) {
 /* ============================================================ ICS */
 function icsEsc(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n'); }
 function parseTime(t) { const m = String(t || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i); if (!m) return null; let h = +m[1]; const mi = +(m[2] || 0); const ap = (m[3] || '').toLowerCase(); if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0; if (!ap && h < 9) h += 12; return [h, mi]; }
+const addDayStr = d => iso(new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6) + 1)).replace(/-/g, '');
+const icsStamp = (d, m) => { let day = d; if (m >= 1440) { m -= 1440; day = addDayStr(d); } return `${day}T${String(Math.floor(m / 60)).padStart(2, '0')}${String(m % 60).padStart(2, '0')}00`; };
+// Gigs: start at load-in (else start time), end one hour after the show ends. Practices: start → end as entered.
+function eventSpan(g) {
+  const mm = a => a[0] * 60 + a[1];
+  const st = parseTime(g.start_time), en = parseTime(g.end_time), li = g.kind === 'gig' ? parseTime(g.load_in_time) : null;
+  const first = li || st; if (!first) return null;
+  const start = mm(first); let end;
+  if (en) end = mm(en); else if (st) end = mm(st) + (g.hours ? n0(g.hours) * 60 : 120); else end = start + 120;
+  if (end <= start) end += 1440;
+  if (g.kind === 'gig') end += 60;
+  return [start, end];
+}
 function icsFor(list) {
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Trailer Folk//Band HQ//EN', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Trailer Folk', 'X-WR-TIMEZONE:America/Chicago'];
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
   list.filter(g => g.gig_date).forEach(g => {
-    const d = g.gig_date.replace(/-/g, ''); const t = parseTime(g.start_time); const e = parseTime(g.end_time);
+    const d = g.gig_date.replace(/-/g, ''); const sp = eventSpan(g);
     lines.push('BEGIN:VEVENT', `UID:${g.id}@band.eckerthaus.com`, `DTSTAMP:${stamp}`);
-    if (t) {
-      const dur = g.hours ? n0(g.hours) * 60 : 120; const eh = e || [t[0] + Math.floor((t[1] + dur) / 60), (t[1] + dur) % 60];
-      const f = ([h, m]) => String(Math.min(h, 23)).padStart(2, '0') + String(m).padStart(2, '0') + '00';
-      lines.push(`DTSTART;TZID=America/Chicago:${d}T${f(t)}`, `DTEND;TZID=America/Chicago:${d}T${f(eh)}`);
-    } else { const nx = iso(new Date(pd(g.gig_date).getTime() + 864e5)).replace(/-/g, ''); lines.push(`DTSTART;VALUE=DATE:${d}`, `DTEND;VALUE=DATE:${nx}`); }
+    if (sp) lines.push(`DTSTART;TZID=America/Chicago:${icsStamp(d, sp[0])}`, `DTEND;TZID=America/Chicago:${icsStamp(d, sp[1])}`);
+    else { const nx = addDayStr(d); lines.push(`DTSTART;VALUE=DATE:${d}`, `DTEND;VALUE=DATE:${nx}`); }
     lines.push(`SUMMARY:${icsEsc(g.kind === 'practice' ? 'Trailer Folk practice' : 'Trailer Folk: ' + g.title + (g.status !== 'confirmed' && g.status !== 'complete' ? ' (' + STATUS_LABEL[g.status] + ')' : ''))}`);
     if (g.venue || g.address) lines.push(`LOCATION:${icsEsc([g.venue, g.address].filter(Boolean).join(', '))}`);
-    lines.push(`DESCRIPTION:${icsEsc((g.notes || '') + '\n' + location.origin + location.pathname + '#gig/' + g.id)}`);
+    const times = g.kind === 'gig' ? [g.load_in_time ? 'Load-in: ' + g.load_in_time : '', g.start_time ? 'Start: ' + g.start_time : '', g.end_time ? 'End: ' + g.end_time : ''].filter(Boolean).join('\n') : '';
+    lines.push(`DESCRIPTION:${icsEsc([times, g.notes || '', location.origin + location.pathname + '#gig/' + g.id].filter(Boolean).join('\n'))}`);
     if (g.kind === 'gig' && g.status === 'confirmed') lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Gig tomorrow', 'TRIGGER:-P1D', 'END:VALARM');
     lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Trailer Folk', 'TRIGGER:-PT2H', 'END:VALARM', 'END:VEVENT');
   });
@@ -1162,7 +1270,7 @@ function mailDraft(g, kind) {
   const T = {
     quote: [`Trailer Folk quote — ${g.title}`, `Hi ${first},\n\nThanks for reaching out! We'd love to play ${when}${g.venue ? ' at ' + g.venue : ''}. The attached quote covers ${lineItem(g).toLowerCase()} for ${money(g.quote)}, including our sound and lighting.\n\n${n0(g.deposit_amount) ? `A ${money(g.deposit_amount)} deposit locks in the date.` : 'Just reply to confirm and we\'ll put you on the calendar.'} The quote is good for ${st.quote_valid_days || 30} days.`],
     deposit: [`Trailer Folk — deposit for ${g.gig_date ? mdY(g.gig_date) : 'your event'}`, `Hi ${first},\n\nQuick reminder that we're holding ${when} for you. A ${money(g.deposit_amount || 0)} deposit locks in the date — checks payable to ${payeeOf(g).name || 'Tyler Eckert'}, memo Trailer Folk.`],
-    details: [`Trailer Folk — getting ready for ${g.title}`, `Hi ${first},\n\nWe're looking forward to ${when}! A few things to confirm:\n\n• Start time: ${g.start_time || '?'}${g.hours ? ' (' + g.hours + ' hours of music)' : ''}\n• We'll arrive about 2 hours early to load in and soundcheck\n• We need a ~20' x 15' area and access to standard power near the stage\n• Venue address: ${g.address || g.venue || '?'}\n• Any must-play songs, first dance, or announcements?\n\nWe bring all sound and lighting.`],
+    details: [`Trailer Folk — getting ready for ${g.title}`, `Hi ${first},\n\nWe're looking forward to ${when}! A few things to confirm:\n\n• Start time: ${g.start_time || '?'}${g.hours ? ' (' + g.hours + ' hours of music)' : ''}\n• ${g.load_in_time ? 'Load-in: ' + g.load_in_time + ' (we set up and soundcheck before guests arrive)' : "We'll arrive about 2 hours early to load in and soundcheck"}\n• We need a ~20' x 15' area and access to standard power near the stage\n• Venue address: ${g.address || g.venue || '?'}\n• Any must-play songs, first dance, or announcements?\n\nWe bring all sound and lighting.`],
     invoice: [`Trailer Folk invoice ${g.invoice_no || ''}`.trim(), `Hi ${first},\n\nThank you for having us${g.gig_date ? ' on ' + fmtDate(g.gig_date, true) : ''}! Attached is invoice ${g.invoice_no || ''} for ${money(balanceDue(g) || g.quote)}, due ${settings().default_terms || 'NET30'}. Checks payable to ${payeeOf(g).name || 'Tyler Eckert'}, memo Trailer Folk.`],
     thanks: [`Thank you from Trailer Folk`, `Hi ${first},\n\nWe got your payment — thank you! We had a blast at ${g.title}. If you have a minute, a quick review or tagging us (${st.instagram || '@trailer_folk'}) helps a ton. Hope to play for you again.`],
   }[kind];
@@ -1229,13 +1337,13 @@ const ACTIONS = {
   'song-filter': ({ v }) => { UI.songFilter = v; keepUI(); render(); },
   'lib-filter': ({ v }) => { UI.libFilter = v; render(); },
   'money-year': ({ v }) => { UI.moneyYear = v; keepUI(); render(); },
-  'cal-move': ({ v }) => { const b = UI.calMonth ? pd(UI.calMonth + '-01') : new Date(today().getFullYear(), today().getMonth(), 1); const d = v === '0' ? today() : new Date(b.getFullYear(), b.getMonth() + Number(v), 1); UI.calMonth = iso(d).slice(0, 7); keepUI(); render(); },
-  'new-gig': async () => { const r = await guard(() => save('gigs', { id: uuid(), kind: 'gig', status: 'inquiry', title: 'New lead', payee_id: (S.payees.find(p => p.is_default) || {}).id || null })); if (r) location.hash = '#gig/' + r.id; },
+  'cal-move': ({ v }) => { const b = UI.calMonth ? pd(UI.calMonth + '-01') : new Date(today().getFullYear(), today().getMonth(), 1); const step = UI.calSpan === '3mo' ? 3 : 1; const d = v === '0' ? today() : new Date(b.getFullYear(), b.getMonth() + Number(v) * step, 1); UI.calMonth = iso(d).slice(0, 7); keepUI(); render(); },
+  'new-gig': async () => { const r = await guard(() => save('gigs', { id: uuid(), kind: 'gig', status: 'inquiry', title: 'New lead', payee_id: (S.payees.find(p => p.is_default) || {}).id || null })); if (r) { S.editGig = r.id; location.hash = '#gig/' + r.id; } },
   'new-practice': async () => {
     const last = S.gigs.filter(x => x.kind === 'practice').sort((a, b) => (b.gig_date || '').localeCompare(a.gig_date || ''))[0] || {};
     const nextGig = upcoming(['gig']).find(x => x.status === 'confirmed');
     const r = await guard(() => save('gigs', { id: uuid(), kind: 'practice', title: 'Practice', gig_date: todayIso(), start_time: last.start_time || '8pm', venue: last.venue || "Jessie's", notes: nextGig ? `Setlist run for ${nextGig.title}` : '' }));
-    if (r) location.hash = '#gig/' + r.id;
+    if (r) { S.editGig = r.id; location.hash = '#gig/' + r.id; }
   },
   'set-status': async ({ v, g }) => { if (!g) return; const patch = collectGig(g); patch.status = v; if (v === 'complete' && patch.paid == null && !patch.deposit_received && n0(patch.quote)) toast('Marked played — log what was paid below.'); await guard(() => save('gigs', patch), 'Status: ' + STATUS_LABEL[v]); S.dirty = false; render(); },
   'save-gig': async ({ g }) => { if (!g) return; await saveGigForm(g); },
@@ -1250,6 +1358,21 @@ const ACTIONS = {
   'ics-all': () => download('Trailer Folk calendar.ics', icsFor(S.gigs.filter(x => x.gig_date && x.gig_date >= iso(new Date(Date.now() - 90 * 864e5)) && (x.kind === 'practice' || live(x)))), 'text/calendar'),
   'copy-feed': () => copy($('#feedUrl').value),
   'rotate-token': async () => { const st = settings(); await guard(() => save('settings', { ...st, ics_token: uuid() }), 'New link made — re-subscribe on each phone'); render(); },
+  'gig-edit': ({ g }) => { if (!g) return; S.editGig = g.id; render(); },
+  'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
+  'gig-chk': async ({ el, g }) => {
+    if (!g) return; const k = el.dataset.k, on = el.checked, r = { ...g, [k]: on };
+    if (k === 'deposit_received') r.deposit_received_on = on ? (g.deposit_received_on || todayIso()) : null;
+    if (k === 'paid_in_full') r.paid_on = on ? (g.paid_on || todayIso()) : g.paid_on;
+    if (k === 'invoice_sent' && on && !g.invoiced_on) r.invoiced_on = todayIso();
+    const ok = await guard(() => save('gigs', r), 'Saved');
+    if (!ok) el.checked = !on;
+    else if (S.editGig !== g.id) render();            // while editing, leave the form alone so nothing typed is lost
+  },
+  'sl-edit': ({ g }) => { if (!g) return; S.editSl = g.id; render(); },
+  'sl-view': ({ g }) => { if (!g) return; S.editSl = null; render(); },
+  'cal-span': ({ v }) => { UI.calSpan = v; keepUI(); render(); },
+  'toggle-cb': ({ el }) => { UI.cb = el.checked; keepUI(); render(); },
   // setlists
   'sel-set': ({ v, e }) => { if (e.target.closest('button')) return; UI.selSet = Number(v); render(); },
   'lib-add': async ({ id, g }) => { if (!g) return; const its = itemsOf(g.id).filter(i => i.set_no === UI.selSet); await guard(() => save('setlist_items', { id: uuid(), setlist_id: g.id, set_no: UI.selSet, position: (its.length ? Math.max(...its.map(i => i.position)) : 0) + 1, song_id: id, played: true, pinned: false })); render(); },
@@ -1309,12 +1432,12 @@ const ACTIONS = {
   'set-pdf': ({ g }) => { if (!itemsOf(g.id).length) return toast('Add songs first.', true); stagePdf(g); },
   'set-text': ({ g }) => { const its = itemsOf(g.id).filter(i => i.played); const txt = [...new Set(its.map(i => i.set_no))].map(n => `SET ${n}\n` + its.filter(i => i.set_no === n).map((i, k) => { const s = byId('songs', i.song_id) || {}; return `${k + 1}. ${s.title} (${songLabel(s)})`; }).join('\n')).join('\n\n'); copy(`${g.title}${g.gig_date ? ' — ' + fmtDate(g.gig_date) : ''}\n\n${txt}`); },
   // setlist records
-  'sl-new': async ({ el }) => { const gid = el.dataset.gig || null; const r = await guard(() => save('setlists', { id: uuid(), gig_id: gid, name: null })); if (r) location.hash = '#setlist/' + r.id; },
+  'sl-new': async ({ el }) => { const gid = el.dataset.gig || null; const r = await guard(() => save('setlists', { id: uuid(), gig_id: gid, name: null })); if (r) { S.editSl = r.id; location.hash = '#setlist/' + r.id; } },
   'sl-unassign': async ({ g }) => { const L = byId('setlists', g.id); await guard(() => save('setlists', { ...L, name: L.name || slName(L), gig_id: null }), 'Unassigned — kept as a draft'); render(); },
   'sl-dup': async ({ g }) => {
     const L = byId('setlists', g.id); const copyId = uuid();
     const r = await guard(async () => { const c = await save('setlists', { ...L, id: copyId, gig_id: null, name: `${slName(L)} (copy)`, created_at: undefined, updated_at: undefined }); await saveMany('setlist_items', itemsOf(L.id).map(i => ({ ...i, id: uuid(), setlist_id: copyId, created_at: undefined, updated_at: undefined }))); return c; }, 'Copied as a draft');
-    if (r) location.hash = '#setlist/' + copyId;
+    if (r) { S.editSl = copyId; location.hash = '#setlist/' + copyId; }
   },
   'sl-del-ask': ({ el }) => { el.parentElement.innerHTML = `<span class="confirm">Delete this setlist and its songs? <button class="btn danger sm" data-act="sl-del">Delete</button><button class="btn sm" data-act="cancel-del">Keep</button></span>`; },
   'sl-del': async ({ g }) => { const id = g.id; if (await guard(() => del('setlists', id), 'Setlist deleted')) {} S.setlist_items = S.setlist_items.filter(i => i.setlist_id !== id); location.hash = '#setlists'; },
@@ -1374,7 +1497,7 @@ async function saveGigForm(g, quiet) {
       if (changed) { const c = await guard(() => save('clients', { ...(base || { id: uuid() }), ...vals })); if (c) r.client_id = c.id; }
     }
   }
-  if (await guard(() => save('gigs', r), quiet ? null : 'Saved')) { S.dirty = false; if (!quiet) render(); }
+  if (await guard(() => save('gigs', r), quiet ? null : 'Saved')) { S.dirty = false; if (!quiet) { S.editGig = null; render(); } }
 }
 async function copySetlist(toId, fromId) {                // setlist ids
   if (itemsOf(toId).length) { toast('Clear this setlist before copying another one in.', true); render(); return; }
