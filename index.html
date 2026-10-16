@@ -314,6 +314,35 @@ a.back:active{background:rgba(243,238,228,.14)}
 .snote-edit{margin:0 0 8px 30px}
 .snote-edit .in{font-size:13px;padding:7px 10px}
 .tbl th[data-act]{cursor:pointer;user-select:none}
+/* ---------- gig mode ---------- */
+#gigMode{position:fixed;inset:0;z-index:90;background:#0a0702;display:flex;flex-direction:column;color:var(--cream)}
+.gm-top{flex:none;display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;background:#14100a;border-bottom:1px solid var(--line-soft)}
+.gm-title{flex:1;min-width:0}.gm-t1{font-weight:800;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gm-t2{font-size:12px;color:var(--muted)}
+.gm-btn{min-width:46px;height:44px;padding:0 10px;border-radius:12px;border:1px solid var(--line);background:rgba(243,238,228,.08);color:var(--cream);font-size:16px;font-weight:700;font-family:inherit}
+.gm-awake{background:none;border:0;font-size:12px;font-family:inherit;color:var(--muted);padding:6px}
+.gm-view{flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;background:#1b1812;display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:6px}
+.gm-page{background:#fff;display:block;flex:none;margin:0 auto}
+.gm-msg{margin:auto;text-align:center;color:var(--muted);padding:24px;line-height:1.5}
+.gm-card{margin:auto;text-align:center;padding:24px;line-height:1.7;font-size:18px}.gm-big{font-family:var(--display);font-weight:800;font-size:clamp(30px,8vw,56px);color:var(--gold);line-height:1.1}.gm-bigsub{font-size:24px;margin:6px 0 10px}
+.gm-bottom{flex:none;background:#14100a;border-top:2px solid var(--gold);padding:10px 12px calc(env(safe-area-inset-bottom,0px) * .35 + 10px);max-height:40vh;overflow:auto}
+.gm-nav{display:flex;gap:10px;align-items:stretch}
+.gm-nb{flex:none;width:64px;min-height:64px;border-radius:14px;border:1px solid var(--line);background:rgba(255,191,67,.14);color:var(--gold);font-size:26px;font-weight:800;font-family:inherit}
+.gm-nb:disabled{opacity:.3}
+.gm-info{flex:1;min-width:0;line-height:1.4}
+.gm-lbl{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.08em;color:var(--gold);margin-right:6px}
+.gm-now{font-size:15px;margin-bottom:4px;color:var(--cream)}
+.gm-say{color:var(--gold);font-style:italic;font-size:16px;margin-bottom:4px}
+.gm-next{font-size:16px}.gm-bits{color:var(--muted);font-size:14px}
+.gm-alert{color:var(--gold);font-size:13px;margin-top:2px}
+.gm-notes{margin-top:8px;font-size:13px;color:var(--muted);border-top:1px dashed var(--line);padding-top:6px}
+.gm-notes .past{opacity:.4;text-decoration:line-through}.gm-notes .now{color:var(--gold)}
+.gm-drawer{position:absolute;inset:0;z-index:5;background:rgba(5,3,0,.97);overflow:auto;padding-top:env(safe-area-inset-top,0px)}
+.gm-dh{padding:10px 14px 4px;color:var(--gold);font-weight:800;letter-spacing:.06em;font-size:12px}
+.gm-di{display:flex;gap:12px;align-items:center;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line-soft);color:var(--cream);padding:14px;font-size:17px;font-family:inherit}
+.gm-di .n{color:var(--muted);width:24px}.gm-di .grow{flex:1;min-width:0}.gm-di.on{background:rgba(255,191,67,.14);color:var(--gold)}
+.toast{z-index:120}
+/* page text size (Settings → Text size; Auto = a bit larger from iPad width up) */
+main.view,.modal>*{zoom:var(--tz,1)}
 </style>
 </head>
 <body>
@@ -321,6 +350,6 @@ a.back:active{background:rgba(243,238,228,.14)}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=15"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>
