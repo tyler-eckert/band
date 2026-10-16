@@ -1,10 +1,11 @@
-Trailer Folk HQ - latest full set (rev 2: footer/header/home fix, app.js?v=8)
+Trailer Folk HQ - latest full set (rev 6, app.js?v=12)
 
 NEW / CHANGED in this set (use these):
   index.html                                        header moved down, colorblind CSS, app.js?v=7
   app.js                                            home reorder + 4 KPIs, gig/setlist view+edit, checklist,
                                                     colorblind toggle, 3-month calendar, load-in invites
-  supabase/05_view_edit_checklist.sql               NEW - run once (load_in_time + checklist columns)
+  supabase/05_view_edit_checklist.sql               run once (load_in_time + checklist columns)
+  supabase/06_gig_photos.sql                        NEW - run once (gig photos + storage bucket)
   supabase/functions/band-calendar/index.ts         load-in start / +1hr end, redeploy after running 05
 
 UNCHANGED (your originals, as uploaded):
@@ -14,12 +15,13 @@ UNCHANGED (your originals, as uploaded):
 NOT INCLUDED (I never received them; keep your existing copies):
   CNAME, assets/, vendor/
 
-Order: run 05 SQL -> push index.html + app.js (+ CNAME, assets/, vendor/) -> redeploy band-calendar.
-0b5c9b168585dec17dcad48084782bca  ./app.js
-ba345db51d95e0409a9bd8dff565a318  ./index.html
+Order: run 05 then 06 SQL -> push index.html + app.js (+ CNAME, assets/, vendor/) -> redeploy band-calendar.
+18dea57645b5374ac85cc830433c0bb7  ./app.js
+81d2bafaa2e98737b99e4e2514a7e7c9  ./index.html
 9e3c9acaba3374f07733b0146977da39  ./supabase/01_schema.sql
 3cb9a13c127a1ff46b289fef5c4b7e22  ./supabase/02_seed.sql
 3a55a92b09df5b3f80b3df697d27f1f0  ./supabase/03_setlist_planner.sql
 bac4e184d7bb10a923852b7a0e5a0764  ./supabase/04_setlists.sql
 c78fe2515b1c4e986e0f1038d2c71fde  ./supabase/05_view_edit_checklist.sql
-7201e910cd45175be1730bd20dfbb789  ./supabase/functions/band-calendar/index.ts
+392b9a24fe67e8f3c4207aadeab2e807  ./supabase/06_gig_photos.sql
+c882d7f44d923c03007100fcad2aff43  ./supabase/functions/band-calendar/index.ts

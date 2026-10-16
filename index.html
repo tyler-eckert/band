@@ -248,10 +248,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 @media (max-width:980px), (pointer:coarse){ .in,select.in,textarea.in,input,select,textarea{font-size:16px!important} }
 @media (max-width:980px){
   .nav,.who .nm{display:none}
-  main{padding-bottom:calc(80px + env(safe-area-inset-bottom) * .1)}
+  main{padding-bottom:72px}
   .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;background:rgba(14,10,1,.97);border-top:1px solid var(--line-soft);
-    padding:4px max(6px,env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) * .1) max(6px,env(safe-area-inset-left))}
-  .tabbar a{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:6px 0;color:var(--muted);text-decoration:none;font-size:10.5px;font-weight:600;line-height:1}
+    padding:4px max(6px,env(safe-area-inset-right)) 2px max(6px,env(safe-area-inset-left))}
+  .tabbar a{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:8px 0 0;color:var(--muted);text-decoration:none;font-size:10.5px;font-weight:600;line-height:1}
   .tabbar a svg{width:22px;height:22px;display:block;flex:none}
   .tabbar a.on{color:var(--gold)}
   .split{grid-template-columns:minmax(0,1fr)}
@@ -298,6 +298,20 @@ body.cb .sev.md{width:8px;height:8px;margin-top:6px;transform:rotate(45deg)}
 body.cb .sev.lo{border-radius:50%}
 body.cb .bar i.over{background:repeating-linear-gradient(45deg,var(--bad) 0 4px,#ffd9bd 4px 8px)}
 body.cb .toast.err{background:var(--bad);color:#140e02}
+/* ---------- back button, photos, setlist notes, section heading ---------- */
+a.back{display:inline-flex;align-items:center;gap:6px;font-size:16px;font-weight:600;color:var(--cream);text-decoration:none;padding:9px 16px 9px 12px;border-radius:999px;background:rgba(243,238,228,.07);border:1px solid var(--line)}
+a.back:active{background:rgba(243,238,228,.14)}
+.sec2{font-family:var(--display);font-stretch:112%;font-weight:800;color:var(--gold);font-size:clamp(22px,3.4vw,32px);margin:30px 0 14px;line-height:1.1}
+.up-scroll{max-height:400px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;margin-right:-6px;padding-right:6px}
+.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:10px}
+.photos .ph{position:relative}
+.photos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:rgba(243,238,228,.05);cursor:zoom-in;display:block}
+.photos .ph .ib{position:absolute;top:6px;right:6px;background:rgba(10,7,1,.8)}
+.lightbox{max-width:100%;max-height:92vh;border-radius:12px;margin:auto;display:block}
+.snote{margin:2px 0 6px 30px;padding:5px 10px;border-left:2px solid var(--gold);color:var(--cream);font-style:italic;font-size:13px;line-height:1.35}
+.snote-edit{margin:0 0 8px 30px}
+.snote-edit .in{font-size:13px;padding:7px 10px}
+.tbl th[data-act]{cursor:pointer;user-select:none}
 </style>
 </head>
 <body>
@@ -305,6 +319,6 @@ body.cb .toast.err{background:var(--bad);color:#140e02}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

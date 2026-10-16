@@ -78,8 +78,7 @@ Deno.serve(async (req) => {
       ? [g.load_in_time ? `Load-in: ${g.load_in_time}` : "", g.start_time ? `Start: ${g.start_time}` : "", g.end_time ? `End: ${g.end_time}` : ""].filter(Boolean).join("\n")
       : "";
     out.push(`DESCRIPTION:${esc([times, g.notes ?? "", `${APP}#gig/${g.id}`].filter(Boolean).join("\n"))}`, `URL:${APP}#gig/${g.id}`);
-    if (g.kind === "gig" && g.status === "confirmed") out.push("BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Gig tomorrow", "TRIGGER:-P1D", "END:VALARM");
-    out.push("BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Trailer Folk", "TRIGGER:-PT2H", "END:VALARM", "END:VEVENT");
+    out.push("END:VEVENT");
   }
   out.push("END:VCALENDAR");
   return new Response(out.map(fold).join("\r\n") + "\r\n", {
