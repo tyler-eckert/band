@@ -216,7 +216,7 @@ function shell(route, inner) {
       <a class="who" href="#settings" style="text-decoration:none" title="Band & settings">${me ? `<img src="${photo(me)}" alt=""><span class="nm small muted">${esc(me.name)}</span>` : ''}</a>
     </div>
   </header>
-  <main class="view">${inner}</main>
+  <div class="scroll"><main class="view">${inner}</main></div>
   <nav class="tabbar">${NAV.filter(n => n[0] !== 'settings').map(([k, l, i]) => `<a href="#${k}" class="${on(k)}">${ICON[i]}${l}</a>`).join('')}</nav>`;
 }
 const title = (t, sub) => `<h1 class="echo disp"><span class="solid">${esc(t)}</span><span class="ghost" aria-hidden="true">${esc(t)}</span></h1>${sub ? `<p class="muted" style="margin:-10px 0 22px">${sub}</p>` : ''}`;
@@ -238,9 +238,9 @@ function render() {
   const route = (location.hash || '#home').slice(1);
   const [sec, id] = route.split('/');
   const views = { home: homeView, gigs: gigsView, gig: () => gigView(id), calendar: calendarView, setlists: setlistsView, setlist: () => setlistView(id), songs: songsView, money: moneyView, settings: settingsView };
-  const y = window.scrollY, same = S._route === route;
+  const sc0 = $('.scroll'), y = sc0 ? sc0.scrollTop : 0, same = S._route === route;
   app.innerHTML = shell(route, (views[sec] || homeView)());
-  if (same) window.scrollTo(0, y); else window.scrollTo(0, 0);
+  const sc1 = $('.scroll'); if (sc1) sc1.scrollTop = same ? y : 0;
   S._route = route;
   after(sec, id);
 }
@@ -765,7 +765,7 @@ function setlistEdit(id) {
   </div>
   <div class="split">
     <div class="sets">${setCards}</div>
-    <section class="panel" style="position:sticky;top:116px">
+    <section class="panel" style="position:sticky;top:0">
       <div class="row"><h2 class="sec" style="margin:0">Song book</h2><span class="spacer"></span><span class="small muted">adds to Set ${UI.selSet}</span></div>
       <div class="row" style="margin:10px 0"><input class="in" id="libSearch" placeholder="Search songs or genre" value="${esc(UI.libSearch)}">
         <div class="chips">${[['active','Active'],['bench','Bench'],['holiday','Holiday'],['all','All']].map(([k, l]) => `<button class="chip ${UI.libFilter === k ? 'on' : ''}" data-act="lib-filter" data-v="${k}">${l}</button>`).join('')}</div></div>
@@ -1535,6 +1535,8 @@ async function boot(session) {
 }
 (async function init() {
   if (!window.__BAND_MOCK__ && !supa) { $('#app').innerHTML = '<main><p>Could not load the Supabase library — check your connection and reload.</p></main>'; return; }
+  // a fresh open always lands on Home — but keep deep links (calendar invites) and sign-in links
+  { const h = (location.hash || '').slice(1); if (h && !/^(gig|setlist)\//.test(h) && !/access_token|refresh_token|error|type=/.test(h)) history.replaceState(null, '', location.pathname + location.search + '#home'); }
   let first = true;
   api.onAuth(s => { if (first) return; if ((s && s.user.id) !== (S.session && S.session.user.id)) boot(s); });
   const s = await api.session(); first = false; boot(s);
