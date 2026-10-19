@@ -1,4 +1,4 @@
-Trailer Folk HQ - latest full set (rev 33, index.html loads app.js?v=40)
+Trailer Folk HQ - latest full set (rev 34, index.html loads app.js?v=41)
 
 PUSH TO GITHUB (repo root, replacing the old copies):
   index.html, app.js
@@ -23,8 +23,8 @@ REDEPLOY: supabase/functions/band-calendar/index.ts   (CHANGED in this release -
 NOT INCLUDED (keep your existing copies): CNAME, assets/, vendor/
 
 Checksums:
-8c938ef6b4b54b84bdd5a0c1c9c957f2  ./app.js
-21900b7c2a55d16bf593062d493e5cb9  ./index.html
+e3829e9f8aad2fdc05382e5656dbace9  ./app.js
+5a24eb789bd0e67c92cf138d54e08835  ./index.html
 96de323330f8b8336f637a0051835e00  ./pdf.min.js
 a53a71a2a5d618ed0f86ebf099db032a  ./pdf.worker.min.js
 2ee41112a44fe7014dce33e26468ba93  ./pdfjs-LICENSE.txt

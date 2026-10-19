@@ -53,7 +53,7 @@ const api = window.__BAND_MOCK__ || {
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
-const APP_V = 40;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 41;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1346,13 +1346,6 @@ function settingsView() {
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
     <div class="small faint" style="margin-top:14px">App version ${APP_V} · <a href="#" data-act="app-refresh">Update app files now</a></div>
-    <div class="f" style="margin-top:14px;max-width:460px"><span>Page-turner pedal</span>
-      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn sm" data-act="ped-learn" data-v="next">Teach “next”</button><button class="btn sm" data-act="ped-learn" data-v="prev">Teach “previous”</button><button class="btn sm ghost" data-act="ped-reset">Reset</button></div>
-      <div class="small muted" id="pedStatus" style="margin-top:8px">Press a pedal switch — everything the iPad receives shows below. If nothing appears, the iPad isn’t getting anything from it (check the pedal’s mode and pairing).${UI.ped && (UI.ped.next || []).length ? ` Learned: next = ${esc(UI.ped.next[0].k)}${(UI.ped.prev || []).length ? ', previous = ' + esc(UI.ped.prev[0].k) : ''}.` : ''}</div>
-      <input id="pedFocus" class="in" readonly inputmode="none" autocomplete="off" placeholder="① Tap here, then press the pedal" style="margin-top:8px;max-width:340px">
-      <pre id="pedLog" class="small" style="margin:6px 0 0;padding:8px 10px;background:rgba(243,238,228,.05);border-radius:8px;min-height:3.4em;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace">${esc((S._pedLines || []).join('\n'))}</pre>
-      <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
-      <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
     <label class="f" style="margin-top:14px;max-width:320px">Header position (iPad)<select class="in" data-hdr>${[[10, 'Snug'], [32, 'Medium'], [56, 'Low'], [80, 'Lowest']].map(([v, l]) => `<option value="${v}" ${(UI.hdr != null ? UI.hdr : 56) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:14px;max-width:320px">Footer position (iPad)<select class="in" data-ftr>${[[0, 'Lowest'], [6, 'Low'], [14, 'Medium'], [24, 'High'], [34, 'Highest']].map(([v, l]) => `<option value="${v}" ${(UI.fpx != null ? UI.fpx : 14) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:14px;max-width:320px">Text size<select class="in" data-text-size><option value="auto" ${UI.tz == null ? 'selected' : ''}>Auto (a bit larger on iPad)</option><option value="1" ${UI.tz === 1 ? 'selected' : ''}>Normal</option><option value="1.12" ${UI.tz === 1.12 ? 'selected' : ''}>Large</option><option value="1.25" ${UI.tz === 1.25 ? 'selected' : ''}>Extra large</option></select></label>
@@ -1400,7 +1393,16 @@ function settingsView() {
       <div class="list">${S.clients.slice().sort((a, b) => (a.org || a.contact_name || '').localeCompare(b.org || b.contact_name || '')).map(c => { const n = S.gigs.filter(g => g.client_id === c.id).length; return `<div class="li"><div class="grow"><div class="t">${esc(c.org || c.contact_name)}</div><div class="s">${esc([c.contact_name, c.email, c.phone].filter(Boolean).join(' · '))}</div></div><span class="small muted">${esc(c.code || '')} · ${n} gig${n === 1 ? '' : 's'}</span></div>`; }).join('') || '<div class="empty">Clients get saved from the gig page.</div>'}</div>
     </section>
   </div>
-  <div class="row" style="margin-top:18px"><span class="small muted">Signed in as ${esc(S.session.user.email)}</span><span class="spacer"></span><button class="btn" data-act="signout">Sign out</button></div>`;
+  <div class="row" style="margin-top:18px"><span class="small muted">Signed in as ${esc(S.session.user.email)}</span><span class="spacer"></span><button class="btn" data-act="signout">Sign out</button></div>
+  <section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Page-turner pedal</h2>
+    <div class="f" style="max-width:560px">
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn sm" data-act="ped-learn" data-v="next">Teach “next”</button><button class="btn sm" data-act="ped-learn" data-v="prev">Teach “previous”</button><button class="btn sm ghost" data-act="ped-reset">Reset</button></div>
+      <div class="small muted" id="pedStatus" style="margin-top:8px">Press a pedal switch — everything the iPad receives shows below. If nothing appears, the iPad isn’t getting anything from it (check the pedal’s mode and pairing).${UI.ped && (UI.ped.next || []).length ? ` Learned: next = ${esc(UI.ped.next[0].k)}${(UI.ped.prev || []).length ? ', previous = ' + esc(UI.ped.prev[0].k) : ''}.` : ''}</div>
+      <input id="pedFocus" class="in" readonly inputmode="none" autocomplete="off" placeholder="① Tap here, then press the pedal" style="margin-top:8px;max-width:340px">
+      <pre id="pedLog" class="small" style="margin:6px 0 0;padding:8px 10px;background:rgba(243,238,228,.05);border-radius:8px;min-height:3.4em;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace">${esc((S._pedLines || []).join('\n'))}</pre>
+      <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
+      <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
+  </section>`;
 }
 
 /* ============================================================ PDFs */
