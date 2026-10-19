@@ -56,7 +56,7 @@ TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 51;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 52;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -611,6 +611,54 @@ function photosPanel(g, editing) {
   return `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Photos</h2><span class="spacer"></span><label class="btn sm gold" style="cursor:pointer">+ Add photo<input type="file" accept="image/*" hidden data-photo="${g.id}"></label></div>
     ${ph.length ? `<div class="photos" style="margin-top:12px">${ph.map(p => `<div class="ph"><img data-ph="${esc(p.path)}" data-act="photo-open" alt="Gig photo">${editing ? `<button class="ib" data-act="photo-del" data-path="${esc(p.path)}" title="Remove photo">✕</button>` : ''}</div>`).join('')}</div>` : '<p class="small muted" style="margin:10px 0 0">Load-in map, stage plot, parking — add a photo and everyone can see it here.</p>'}</section>`;
 }
+/* ============================================================ drag songs in the setlist editor */
+const DRAG = { id: null, pid: null, ghost: null, row: null, x: 0, y: 0, dx: 0, dy: 0, raf: 0 };
+function dragTarget(x, y) {
+  let panel = null;
+  for (const p of $$('.set[data-setn]')) { const r = p.getBoundingClientRect(); if (x >= r.left && x <= r.right && y >= r.top - 8 && y <= r.bottom + 8) { panel = p; break; } }
+  if (!panel) return null;
+  const rows = [...panel.querySelectorAll('.song[data-item]')].filter(r => r.dataset.item !== DRAG.id);
+  for (const r of rows) { const b = r.getBoundingClientRect(); if (y < b.top + b.height / 2) return { set: Number(panel.dataset.setn), before: r.dataset.item, el: r, edge: 'before', panel }; }
+  return { set: Number(panel.dataset.setn), before: null, el: rows[rows.length - 1] || null, edge: 'after', panel };
+}
+function dragMark(t) {
+  $$('.drop-before,.drop-after,.drop-into').forEach(e => e.classList.remove('drop-before', 'drop-after', 'drop-into'));
+  if (!t) return; if (t.el) t.el.classList.add(t.edge === 'before' ? 'drop-before' : 'drop-after'); else t.panel.classList.add('drop-into');
+}
+function dragLoop() {                                                // scroll the page while you hold a song near the top or bottom edge
+  if (DRAG.id == null) return; const sc = $('.scroll');
+  if (sc) { const r = sc.getBoundingClientRect(); if (DRAG.y < r.top + 80) sc.scrollTop -= 14; else if (DRAG.y > r.bottom - 80) sc.scrollTop += 14; dragMark(dragTarget(DRAG.x, DRAG.y)); }
+  DRAG.raf = requestAnimationFrame(dragLoop);
+}
+function dragClean() {
+  cancelAnimationFrame(DRAG.raf); document.body.classList.remove('song-dragging'); if (DRAG.ghost) DRAG.ghost.remove(); if (DRAG.row) DRAG.row.classList.remove('dragging'); dragMark(null);
+  DRAG.id = null; DRAG.ghost = null; DRAG.row = null;
+  const stop = ev => { ev.stopPropagation(); ev.preventDefault(); }; document.addEventListener('click', stop, true); setTimeout(() => document.removeEventListener('click', stop, true), 350);   // the tap that ends a drag must not also select the set
+}
+async function moveItemTo(id, toSet, beforeId) {
+  const it = byId('setlist_items', id); if (!it) return;
+  const all = itemsOf(it.setlist_id), src = all.filter(x => x.set_no === it.set_no && x.id !== id), dst = toSet === it.set_no ? src : all.filter(x => x.set_no === toSet);
+  let idx = beforeId ? dst.findIndex(x => x.id === beforeId) : dst.length; if (idx < 0) idx = dst.length;
+  const before = all.filter(x => x.set_no === it.set_no).map(x => x.id).join(), moved = { ...it, set_no: toSet }; dst.splice(idx, 0, moved);
+  if (toSet === it.set_no && dst.map(x => x.id).join() === before) return;                    // dropped where it already was
+  const rows = dst.map((x, n) => ({ ...x, set_no: toSet, position: n + 1 })); if (toSet !== it.set_no) src.forEach((x, n) => rows.push({ ...x, position: n + 1 }));
+  if (await guard(() => saveMany('setlist_items', rows))) UI.selSet = toSet; render();
+}
+document.addEventListener('pointerdown', e => {
+  const grip = e.target.closest && e.target.closest('.grip[data-grip]'); if (!grip || S.offline || DRAG.id != null || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  e.preventDefault(); const row = grip.closest('.song'), r = row.getBoundingClientRect();
+  Object.assign(DRAG, { id: grip.dataset.grip, pid: e.pointerId, row, x: e.clientX, y: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top });
+  const g = row.cloneNode(true); g.className = 'song editable drag-ghost'; g.removeAttribute('data-item'); g.style.cssText = `width:${r.width}px;left:${r.left}px;top:${r.top}px`; document.body.appendChild(g); DRAG.ghost = g; row.classList.add('dragging'); document.body.classList.add('song-dragging');
+  try { grip.setPointerCapture(e.pointerId); } catch {} dragLoop();
+}, true);
+document.addEventListener('pointermove', e => {
+  if (DRAG.id == null || e.pointerId !== DRAG.pid) return; e.preventDefault(); DRAG.x = e.clientX; DRAG.y = e.clientY;
+  DRAG.ghost.style.left = (e.clientX - DRAG.dx) + 'px'; DRAG.ghost.style.top = (e.clientY - DRAG.dy) + 'px'; dragMark(dragTarget(e.clientX, e.clientY));
+}, { passive: false });
+const dragEnd = (e, cancel) => { if (DRAG.id == null || e.pointerId !== DRAG.pid) return; const id = DRAG.id, t = cancel ? null : dragTarget(e.clientX || DRAG.x, e.clientY || DRAG.y); dragClean(); if (t) moveItemTo(id, t.set, t.before); };
+document.addEventListener('pointerup', e => dragEnd(e, false)); document.addEventListener('pointercancel', e => dragEnd(e, true));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && DRAG.id != null) dragClean(); });
+
 /* ============================================================ global search */
 const SRCH = { sel: 0, list: [] };
 function srchGroups(q) {
@@ -1086,20 +1134,19 @@ function setlistEdit(id) {
     const over = dur > target + 2, slot = ros.find(r => r.kind === 'set' && r.n === n);
     const brk = ros[ros.indexOf(slot) + 1];
     let prev = null;
-    return `<section class="panel set ${UI.selSet === n ? 'sel' : ''}" data-act="sel-set" data-v="${n}">
+    return `<section class="panel set ${UI.selSet === n ? 'sel' : ''}" data-act="sel-set" data-v="${n}" data-setn="${n}">
       <div class="row"><h3>Set ${n}</h3>${slot && slot.from ? `<span class="small muted">${slot.from}–${slot.to}</span>` : ''}<span class="spacer"></span><span class="small num" style="color:${over ? 'var(--bad)' : dur < target - 5 ? 'var(--muted)' : 'var(--ok)'}">${over ? cbm(false) : ''}${hm(dur)} / ${hm(target)}${over ? ' over' : ''}</span></div>
       <div class="bar"><i class="${over ? 'over' : ''}" style="width:${Math.min(100, dur / Math.max(target, 1) * 100)}%"></i></div>
       ${its.map((i, k) => { const s = byId('songs', i.song_id) || { title: '(deleted song)' }; const c = i.played ? changes(prev, s) : changes(null, null); if (i.played) prev = s;
         const warn = [c.tuning ? `<span style="color:var(--bad)">retune → ${esc(s.tuning || 'Standard')}</span>` : '', ...c.inst.map(x => `<span style="color:var(--gold)">${esc(x.who)}: ${esc(x.to)}</span>`)].filter(Boolean).join(' · ');
         return `
-        <div class="song ${i.played ? '' : 'unplayed'}">
+        <div class="song editable ${i.played ? '' : 'unplayed'}" data-item="${i.id}">
+          <span class="grip" data-grip="${i.id}" role="button" aria-label="Drag to reorder" title="Drag to reorder or move to another set"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span>
           <span class="n">${k + 1}</span>
           <div style="min-width:0"><div class="nm">${i.pinned ? '<span title="Pinned — the optimizer keeps it here" style="color:var(--gold)">⚑ </span>' : ''}${esc(s.title)}${s.is_encore ? ' <span class="small" style="color:var(--gold)">encore</span>' : ''}</div>
             <div class="meta">${esc(songLabel(s))} · ${mins(s.length_min)} · ${esc(s.lead_vox || '')}${s.genre ? ' · ' + esc(s.genre) : ''}${s.energy ? ' · ' + '▮'.repeat(s.energy) : ''}</div>
             ${warn ? `<div class="meta">⇄ ${warn}</div>` : ''}</div>
           <div class="acts">
-            <button class="ib" title="Move up" data-act="si-move" data-id="${i.id}" data-v="-1">▲</button>
-            <button class="ib" title="Move down" data-act="si-move" data-id="${i.id}" data-v="1">▼</button>
             ${sets.length > 1 ? `<button class="ib" title="Move to next set" data-act="si-set" data-id="${i.id}">⇄</button>` : ''}
             <button class="ib" title="${i.pinned ? 'Unpin' : 'Pin here (optimizer won’t move it)'}" data-act="si-pin" data-id="${i.id}" style="${i.pinned ? 'color:var(--gold)' : ''}">⚑</button>
             <button class="ib" title="${i.played ? 'Mark skipped' : 'Mark played'}" data-act="si-played" data-id="${i.id}">${i.played ? '✓' : '○'}</button>
