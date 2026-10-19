@@ -41,6 +41,8 @@ const api = window.__BAND_MOCK__ || {
   async uploadChart(path, blob) { const { error } = await supa.storage.from('band-charts').upload(path, blob, { contentType: 'application/pdf', upsert: true }); if (error) throw error; },
   async downloadChart(path) { const { data, error } = await supa.storage.from('band-charts').download(path); if (error) throw error; return data; },
   async removeChart(path) { const { error } = await supa.storage.from('band-charts').remove([path]); if (error) throw error; },
+  async upsertMarks(rows) { const { error } = await supa.from('chart_marks').upsert(rows, { onConflict: 'member_id,song_id,chart_path' }); if (error) throw error; },
+  async getMarks(songIds) { const { data, error } = await supa.from('chart_marks').select('*').in('song_id', songIds); if (error) throw error; return data || []; },
   async remove(table, match) {
     let q = supa.from(table).delete();
     for (const [k, v] of Object.entries(match)) q = Array.isArray(v) ? q.in(k, v) : q.eq(k, v);
@@ -669,7 +671,7 @@ function calendarSection() {
   const last = months[months.length - 1];
   const rangeFrom = iso(months[0]), rangeTo = iso(new Date(last.getFullYear(), last.getMonth() + 1, 0));
   const label = three ? `${months[0].toLocaleDateString('en-US', { month: 'short' })} – ${last.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}` : base.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const feed = `${SUPABASE_URL.replace('.supabase.co', '.functions.supabase.co')}/${CAL_FUNCTION}?token=${st.ics_token || ''}`;
+  const feed = `${SUPABASE_URL}/functions/v1/${CAL_FUNCTION}?token=${st.ics_token || ''}`;
   const rangeList = S.gigs.filter(g => g.gig_date && g.gig_date >= rangeFrom && g.gig_date <= rangeTo).sort((a, b) => a.gig_date.localeCompare(b.gig_date));
   return `<h2 class="sec2">Calendar</h2>
    <div class="row" style="margin-bottom:12px">
@@ -1577,10 +1579,11 @@ function chartFor(songId, memberId = S.me && S.me.id) {          // which PDF th
   return null;
 }
 /* PDFs are kept on the device after the first open, so a weak venue connection can't take the charts away */
-const idb = () => new Promise((res, rej) => { const r = indexedDB.open('tfhq-charts', 2); r.onupgradeneeded = () => { const db = r.result; ['pdf', 'photo', 'snap'].forEach(n => { if (!db.objectStoreNames.contains(n)) db.createObjectStore(n); }); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+const idb = () => new Promise((res, rej) => { const r = indexedDB.open('tfhq-charts', 3); r.onupgradeneeded = () => { const db = r.result; ['pdf', 'photo', 'snap', 'marks'].forEach(n => { if (!db.objectStoreNames.contains(n)) db.createObjectStore(n); }); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 async function idbGet(store, key) { try { const db = await idb(); return await new Promise(res => { const q = db.transaction(store).objectStore(store).get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch { return null; } }
 async function idbPut(store, key, val) { try { const db = await idb(); await new Promise(res => { const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).put(val, key); tx.oncomplete = tx.onerror = tx.onabort = () => res(); }); } catch {} }
-async function idbClear() { try { const db = await idb(); await Promise.all(['pdf', 'photo', 'snap'].map(s => new Promise(res => { const tx = db.transaction(s, 'readwrite'); tx.objectStore(s).clear(); tx.oncomplete = tx.onerror = tx.onabort = () => res(); }))); } catch {} }
+async function idbClear() { try { const db = await idb(); await Promise.all(['pdf', 'photo', 'snap', 'marks'].map(s => new Promise(res => { const tx = db.transaction(s, 'readwrite'); tx.objectStore(s).clear(); tx.oncomplete = tx.onerror = tx.onabort = () => res(); }))); } catch {} }
+async function idbEntries(store) { try { const db = await idb(); return await new Promise(res => { const out = []; const q = db.transaction(store).objectStore(store).openCursor(); q.onsuccess = () => { const c = q.result; if (c) { out.push([c.key, c.value]); c.continue(); } else res(out); }; q.onerror = () => res(out); }); } catch { return []; } }
 const cacheGet = key => idbGet('pdf', key), cachePut = (key, buf) => idbPut('pdf', key, buf);
 async function chartData(c) {
   const key = `${c.path}|${c.updated_at || c.created_at || ''}`;
@@ -1666,6 +1669,108 @@ async function refreshNow(manual) {
   }, 90000);
 })();
 
+/* ============================================================ pencil markup */
+const GMK = { on: false, tool: 'pen', color: '#d11a2a', strokes: [], undo: [], key: null, songId: null, path: null, cur: null, pending: null, timer: null, scroll: null };
+const PEN_COLORS = [['#111111', 'Black'], ['#d11a2a', 'Red'], ['#1d4ed8', 'Blue']];
+const r3 = n => Math.round(n * 1000) / 1000;
+function segDist(px, py, ax, ay, bx, by) {                          // distance from a point to a line segment
+  const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy, t = l ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l)) : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+function drawStroke(ctx, s, w, h) {                                // points are stored as fractions of the page, so marks fit any zoom or screen
+  const pts = s.pts; if (!pts.length || !ctx) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = s.c; ctx.fillStyle = s.c;
+  if (s.t === 'hl') {
+    ctx.globalAlpha = .38; ctx.lineWidth = s.w * w; ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h)); ctx.stroke();
+  } else if (pts.length === 1) { ctx.beginPath(); ctx.arc(pts[0][0] * w, pts[0][1] * h, s.w * w * (.5 + pts[0][2]) / 2, 0, 7); ctx.fill(); }
+  else for (let i = 1; i < pts.length; i++) { ctx.lineWidth = s.w * w * (.5 + pts[i][2]); ctx.beginPath(); ctx.moveTo(pts[i - 1][0] * w, pts[i - 1][1] * h); ctx.lineTo(pts[i][0] * w, pts[i][1] * h); ctx.stroke(); }
+  ctx.restore();
+}
+function gmRedraw(only) {
+  (GM.pgs || []).forEach((P, k) => {
+    if (only != null && only !== k) return; const ctx = P.ov.getContext && P.ov.getContext('2d'); if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, P.ov.width, P.ov.height); ctx.setTransform(P.dpr, 0, 0, P.dpr, 0, 0);
+    GMK.strokes.forEach(s => { if (s.pg === k) drawStroke(ctx, s, P.w, P.h); });
+    if (GMK.cur && GMK.cur.stroke && GMK.cur.stroke.pg === k) drawStroke(ctx, GMK.cur.stroke, P.w, P.h);
+  });
+}
+async function gmMarksLoad(tok) {
+  const cur = GM.seq[GM.i], ch = cur.forceChart ? { chart: cur.forceChart } : (cur.song ? chartFor(cur.song.id) : null);
+  GMK.strokes = []; GMK.undo = []; GMK.cur = null; GMK.songId = cur.song && cur.song.id; GMK.path = ch && ch.chart.path; GMK.key = GMK.songId && GMK.path ? `${GMK.songId}|${GMK.path}` : null;
+  if (!GMK.key) return; const rec = await idbGet('marks', GMK.key); if (tok !== GM.tok) return;
+  GMK.strokes = (rec && rec.strokes) || []; gmRedraw();
+}
+function gmMarksFlush() {
+  clearTimeout(GMK.timer); const p = GMK.pending; GMK.pending = null; if (!p) return;
+  idbPut('marks', p.key, { strokes: p.strokes, updated_at: new Date().toISOString(), dirty: true, songId: p.songId, path: p.path }).then(marksSync);
+}
+function gmMarksSaveSoon() {
+  if (!GMK.key) return; GMK.pending = { key: GMK.key, songId: GMK.songId, path: GMK.path, strokes: GMK.strokes.slice() };
+  clearTimeout(GMK.timer); GMK.timer = setTimeout(gmMarksFlush, 500);
+}
+let marksSyncing = false, marksWarned = false;
+async function marksSync() {                                        // push any marks that haven't reached Supabase yet
+  if (marksSyncing || !S.me || navigator.onLine === false) return; marksSyncing = true;
+  try {
+    for (const [key, r] of await idbEntries('marks')) {
+      if (!r.dirty) continue;
+      try { await api.upsertMarks([{ member_id: S.me.id, song_id: r.songId, chart_path: r.path, strokes: r.strokes, updated_at: r.updated_at }]); const now = await idbGet('marks', key); if (now && now.updated_at === r.updated_at) await idbPut('marks', key, { ...now, dirty: false }); }
+      catch (e) { if (/relation|chart_marks|schema cache|does not exist/i.test((e && e.message) || '') && !marksWarned) { marksWarned = true; toast('Pen marks are saved on this iPad only — run the latest SQL in Supabase to sync them.', true); } break; }
+    }
+  } finally { marksSyncing = false; }
+}
+async function marksPull(songIds) {                                 // bring this person's marks from other devices (newest wins; never over unsynced local ones)
+  if (S.offline || !S.me || !songIds.length) return false; let changed = false;
+  try { for (const row of await api.getMarks(songIds)) { const key = `${row.song_id}|${row.chart_path}`, loc = await idbGet('marks', key); if (!loc || (!loc.dirty && new Date(row.updated_at) > new Date(loc.updated_at))) { await idbPut('marks', key, { strokes: row.strokes || [], updated_at: row.updated_at, dirty: false, songId: row.song_id, path: row.chart_path }); if (key === GMK.key) changed = true; } } } catch {}
+  return changed;
+}
+window.addEventListener('online', () => marksSync());
+function gmToolsHtml() {
+  const tb = (v, label, extra = '') => `<button class="gm-tb ${GMK.tool === v && (v !== 'pen' || GMK.color === extra) ? 'on' : ''}" data-gm="tool" data-v="${v}" ${v === 'pen' ? `data-c="${extra}"` : ''}>${label}</button>`;
+  return PEN_COLORS.map(([c, n]) => `<button class="gm-sw ${GMK.tool === 'pen' && GMK.color === c ? 'on' : ''}" data-gm="tool" data-v="pen" data-c="${c}" aria-label="${n} pen" style="--c:${c}"></button>`).join('')
+    + `<button class="gm-tb ${GMK.tool === 'hl' ? 'on' : ''}" data-gm="tool" data-v="hl">Highlight</button><button class="gm-tb ${GMK.tool === 'erase' ? 'on' : ''}" data-gm="tool" data-v="erase">Erase</button><span class="spacer"></span><button class="gm-tb" data-gm="undo">Undo</button><button class="gm-tb" data-gm="clear">Clear</button><button class="gm-tb done" data-gm="pen">Done</button>`;
+}
+function gmPenToggle(on) {
+  GMK.on = on == null ? !GMK.on : on; const d = $('#gigMode'); if (!d) return; d.classList.toggle('gm-pen', GMK.on);
+  const t = $('#gmTools'); if (t) { t.hidden = !GMK.on; t.innerHTML = GMK.on ? gmToolsHtml() : ''; } const b = $('#gmPenBtn'); if (b) b.classList.toggle('on', GMK.on);
+}
+function gmPtr(e) {
+  if (!GMK.on) return; const view = $('#gmView'); if (!view) return;
+  if (e.type === 'pointerdown') {
+    if (e.pointerType === 'touch') { GMK.scroll = { id: e.pointerId, y: e.clientY, x: e.clientX, top: view.scrollTop, left: view.scrollLeft }; return; }     // fingers scroll, the Pencil draws
+    const ov = e.target.closest && e.target.closest('.gm-ov'); if (!ov || !GMK.key) return; e.preventDefault();
+    if (ov.setPointerCapture) { try { ov.setPointerCapture(e.pointerId); } catch {} }
+    const pg = Number(ov.dataset.pg), P = GM.pgs[pg], r = ov.getBoundingClientRect();
+    GMK.cur = { id: e.pointerId, pg, r, P, removed: [], stroke: GMK.tool === 'erase' ? null : { t: GMK.tool === 'hl' ? 'hl' : 'pen', c: GMK.tool === 'hl' ? '#ffd400' : GMK.color, w: GMK.tool === 'hl' ? 0.024 : 0.0034, pg, pts: [] } };
+    gmPtr({ type: 'pointermove', pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY, pressure: e.pressure, pointerType: e.pointerType, getCoalescedEvents: null, _first: true });
+  } else if (e.type === 'pointermove') {
+    if (GMK.scroll && e.pointerId === GMK.scroll.id) { view.scrollTop = GMK.scroll.top - (e.clientY - GMK.scroll.y); view.scrollLeft = GMK.scroll.left - (e.clientX - GMK.scroll.x); return; }
+    const c = GMK.cur; if (!c || e.pointerId !== c.id) return; if (!e._first) e.preventDefault && e.preventDefault();
+    const evs = (e.getCoalescedEvents && e.getCoalescedEvents().length) ? e.getCoalescedEvents() : [e];
+    for (const q of evs) {
+      const x = r3((q.clientX - c.r.left) / c.r.width), y = r3((q.clientY - c.r.top) / c.r.height), p = Math.round((q.pressure || .5) * 100) / 100;
+      if (c.stroke) c.stroke.pts.push([x, y, p]);
+      else { const rad = 0.03; GMK.strokes = GMK.strokes.filter(s => { if (s.pg !== c.pg) return true; const hit = s.pts.some(([sx, sy], i) => { const a = s.pts[i - 1] || [sx, sy]; return segDist(x * c.P.w, y * c.P.h, a[0] * c.P.w, a[1] * c.P.h, sx * c.P.w, sy * c.P.h) < rad * c.P.w; }); if (hit) c.removed.push(s); return !hit; }); }
+    }
+    gmRedraw(c.pg);
+  } else if (e.type === 'pointerup' || e.type === 'pointercancel') {
+    if (GMK.scroll && e.pointerId === GMK.scroll.id) { GMK.scroll = null; return; }
+    const c = GMK.cur; if (!c || e.pointerId !== c.id) return; GMK.cur = null;
+    if (c.stroke && c.stroke.pts.length) { GMK.strokes.push(c.stroke); GMK.undo.push({ add: c.stroke }); gmMarksSaveSoon(); }
+    else if (c.removed.length) { GMK.undo.push({ del: c.removed }); gmMarksSaveSoon(); }
+    gmRedraw(c.pg);
+  }
+}
+function gmUndo() {
+  const a = GMK.undo.pop(); if (!a) return;
+  if (a.add) GMK.strokes = GMK.strokes.filter(s => s !== a.add); else GMK.strokes.push(...a.del);
+  gmRedraw(); gmMarksSaveSoon();
+}
+function gmClear() {
+  if (!GMK.strokes.length) return; if (!confirm('Erase all your pen marks on this song?')) return;
+  GMK.undo.push({ del: GMK.strokes }); GMK.strokes = []; gmRedraw(); gmMarksSaveSoon();
+}
+
 /* ============================================================ gig mode */
 const GM = { open: false, seq: [], i: 0, zoom: 1, tok: 0, lid: null, preview: false, lock: null, awake: false, doc: null, drawer: false };
 const GM_ZOOM = [1, 1.25, 1.5, 2, 2.5, 3];
@@ -1679,13 +1784,17 @@ function openGigMode(seq, lid, opts = {}) {
   d.innerHTML = `<div class="gm-top"><button class="gm-btn" data-gm="exit" aria-label="Exit gig mode">✕</button>
     <div class="gm-title"><div class="gm-t1" id="gmT1"></div><div class="gm-t2"><span id="gmT2"></span> <span id="gmPre"></span></div></div>
     <button class="gm-awake" data-gm="awake" id="gmAwake"></button>
-    <button class="gm-btn" data-gm="zoom-out" aria-label="Smaller">A−</button><button class="gm-btn" data-gm="zoom-in" aria-label="Bigger">A+</button>${GM.preview ? '' : '<button class="gm-btn" data-gm="list" aria-label="Song list">☰</button>'}</div>
-    <div class="gm-view" id="gmView"></div><div class="gm-bottom" id="gmBottom"></div><div class="gm-drawer" id="gmDrawer" hidden></div>`;
+    <button class="gm-btn" data-gm="pen" id="gmPenBtn" aria-label="Pencil markup">Pen</button><button class="gm-btn" data-gm="zoom-out" aria-label="Smaller">A−</button><button class="gm-btn" data-gm="zoom-in" aria-label="Bigger">A+</button>${GM.preview ? '' : '<button class="gm-btn" data-gm="list" aria-label="Song list">☰</button>'}</div>
+    <div class="gm-tools" id="gmTools" hidden></div><div class="gm-view" id="gmView"></div><div class="gm-bottom" id="gmBottom"></div><div class="gm-drawer" id="gmDrawer" hidden></div>`;
   document.body.appendChild(d);
   d.addEventListener('click', gmClick); document.addEventListener('keydown', gmKey); document.addEventListener('visibilitychange', gmVis);
+  const gv = d.querySelector('#gmView'); ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach(t => gv.addEventListener(t, gmPtr)); gv.addEventListener('contextmenu', e => { if (GMK.on) e.preventDefault(); });
+  GMK.on = false; GMK.cur = null; marksSync();
   gmWake(); gmShow(GM.i); if (!GM.preview) gmPrefetch();
+  marksPull([...new Set(seq.map(x => x.song && x.song.id).filter(Boolean))]).then(ch => { if (ch && GM.open) gmMarksLoad(GM.tok); });
 }
 function closeGigMode(quiet) {
+  gmMarksFlush(); GMK.on = false; GMK.cur = null;
   const d = $('#gigMode'); if (d) d.remove();
   document.removeEventListener('keydown', gmKey); document.removeEventListener('visibilitychange', gmVis);
   if (GM.lock) { try { GM.lock.release(); } catch {} GM.lock = null; }
@@ -1698,11 +1807,26 @@ async function gmWake() {
 }
 function gmBadge() { const b = $('#gmAwake'); if (b) b.innerHTML = GM.awake ? '<span style="color:var(--ok)">● awake</span>' : '<span style="color:var(--gold)">may sleep</span>'; }
 function gmVis() { if (document.visibilityState === 'visible' && GM.open) gmWake(); }
-function gmKey(e) { if (!GM.open) return; if (e.key === 'ArrowRight') { e.preventDefault(); gmShow(GM.i + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); gmShow(GM.i - 1); } else if (e.key === 'Escape') closeGigMode(); }
+/* Bluetooth page-turner pedals send ordinary keys (arrows / Page Up-Down). A press scrolls the chart a page; at the end of the chart it moves to the next song. */
+function gmTurn(dir) {
+  const v = $('#gmView'); if (!v) return gmShow(GM.i + dir);
+  const room = dir > 0 ? v.scrollHeight - v.clientHeight - v.scrollTop : v.scrollTop, step = dir * Math.round(v.clientHeight * 0.88);
+  if (room > 6) { if (v.scrollBy) v.scrollBy({ top: step, behavior: 'smooth' }); else v.scrollTop += step; }
+  else gmShow(GM.i + dir);
+}
+function gmKey(e) {
+  if (!GM.open || e.metaKey || e.ctrlKey || e.altKey) return; const k = e.key;
+  if (['ArrowRight', 'ArrowDown', 'PageDown', ' '].includes(k)) { e.preventDefault(); if (!e.repeat) gmTurn(1); }
+  else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(k)) { e.preventDefault(); if (!e.repeat) gmTurn(-1); }
+  else if (k === 'Escape') closeGigMode();
+}
 function gmClick(e) {
   const el = e.target.closest('[data-gm]'); if (!el) return; const a = el.dataset.gm;
   if (a === 'exit') closeGigMode();
   else if (a === 'next') gmShow(GM.i + 1); else if (a === 'prev') gmShow(GM.i - 1);
+  else if (a === 'pen') gmPenToggle();
+  else if (a === 'tool') { GMK.tool = el.dataset.v; if (el.dataset.c) GMK.color = el.dataset.c; $('#gmTools').innerHTML = gmToolsHtml(); }
+  else if (a === 'undo') gmUndo(); else if (a === 'clear') gmClear();
   else if (a === 'zoom-in' || a === 'zoom-out') { const k = GM_ZOOM.indexOf(GM.zoom); GM.zoom = GM_ZOOM[Math.max(0, Math.min(GM_ZOOM.length - 1, k + (a === 'zoom-in' ? 1 : -1)))]; gmLoadChart(); }
   else if (a === 'list') { GM.drawer = !GM.drawer; gmDrawer(); }
   else if (a === 'go') { GM.drawer = false; gmDrawer(); gmShow(Number(el.dataset.i)); }
@@ -1715,6 +1839,7 @@ function gmDrawer() {
 }
 function gmShow(i) {
   if (i < 0 || i >= GM.seq.length) return;
+  gmMarksFlush();
   GM.i = i; if (GM.lid) sessionStorage.setItem('tfgm:' + GM.lid, String(i));
   const cur = GM.seq[i], s = cur.song || {}, inSet = GM.seq.filter(x => x.set === cur.set), pos = inSet.indexOf(cur) + 1;
   $('#gmT1').textContent = s.title || '(deleted song)';
@@ -1751,15 +1876,20 @@ async function gmLoadChart() {
     const [lib, buf] = await Promise.all([loadPdfJs(), chartData(ch.chart)]); if (tok !== GM.tok) return;
     const pdf = await lib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise; if (tok !== GM.tok) { pdf.destroy(); return; }
     if (GM.doc) { try { GM.doc.destroy(); } catch {} } GM.doc = pdf;
-    v.innerHTML = ''; const W = v.clientWidth - 12, H = v.clientHeight - 12, dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    v.innerHTML = ''; GM.pgs = []; const W = v.clientWidth - 12, H = v.clientHeight - 12, dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     for (let n = 1; n <= pdf.numPages; n++) {
       const page = await pdf.getPage(n); if (tok !== GM.tok) return;
       const v0 = page.getViewport({ scale: 1 });
       let w = W * GM.zoom; if (GM.zoom === 1 && pdf.numPages === 1) w = Math.min(W, H * v0.width / v0.height);     // a one-page chart fits the whole screen
       const vp = page.getViewport({ scale: w / v0.width * dpr });
       const cv = document.createElement('canvas'); cv.className = 'gm-page'; cv.width = Math.floor(vp.width); cv.height = Math.floor(vp.height); cv.style.width = vp.width / dpr + 'px'; cv.style.height = vp.height / dpr + 'px';
-      v.appendChild(cv); await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+      const cssW = vp.width / dpr, cssH = vp.height / dpr, wrap = document.createElement('div'), ov = document.createElement('canvas');
+      wrap.className = 'gm-pg'; wrap.style.width = cssW + 'px'; wrap.style.height = cssH + 'px';
+      ov.className = 'gm-ov'; ov.dataset.pg = String(n - 1); ov.width = cv.width; ov.height = cv.height; ov.style.width = cssW + 'px'; ov.style.height = cssH + 'px';
+      wrap.append(cv, ov); v.appendChild(wrap); GM.pgs.push({ ov, w: cssW, h: cssH, dpr });
+      await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
     }
+    await gmMarksLoad(tok);
   } catch (e) { if (tok === GM.tok) v.innerHTML = `<div class="gm-msg">Couldn’t show this chart${navigator.onLine ? '' : ' — you’re offline and it hasn’t been saved on this phone yet'}.<br><small>${esc(e.message || '')}</small></div>${gmNoChart(cur)}`; }
 }
 async function gmPrefetch() {                                       // save every chart in the setlist on this device while there's signal
