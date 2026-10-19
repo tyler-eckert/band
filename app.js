@@ -56,7 +56,7 @@ TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 52;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 53;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -827,7 +827,7 @@ function gigRead(g) {
   return `
   <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a></div>
   ${gigHead(g)}
-  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${practice ? '' : `<a class="btn" href="#daysheet/${g.id}">Day sheet</a>`}${!practice && L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button>' : ''}<button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
+  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${practice ? '' : `<a class="btn" href="#daysheet/${g.id}">Day sheet</a>`}${!practice && L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button>' : ''}<button class="btn gold" data-act="gig-edit">Edit</button></div>
   ${stepper}
   ${right ? `<div class="split"><div class="stack">${left}</div><div class="stack">${right}</div></div>` : `<div class="stack" style="max-width:820px">${left}</div>`}`;
 }
@@ -916,9 +916,6 @@ function gigEdit(g) {
       ${listOf(g.id) ? `<div class="row"><a class="btn sm gold" href="#setlist/${listOf(g.id).id}">Open setlist</a>${listOf(g.id).name ? `<span class="small muted">“${esc(listOf(g.id).name)}”</span>` : ''}</div>`
         : `<div class="row"><button class="btn sm gold" data-act="sl-new" data-gig="${g.id}">New setlist</button>${S.setlists.some(l => !l.gig_id) ? `<select class="in" data-act-change="sl-attach" data-gig="${g.id}" style="width:auto;max-width:220px"><option value="">Use a saved draft…</option>${S.setlists.filter(l => !l.gig_id).map(l => `<option value="${l.id}">${esc(slName(l))} (${itemsOf(l.id).length})</option>`).join('')}</select>` : ''}</div>`}
     </div></details>
-    <details class="panel fold" data-fold="cal" ${foldOpen('cal')}><summary><h2 class="sec">Calendar</h2><span class="sum">Add to your phone</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
-      <div class="row"><button class="btn sm" data-act="ics-one">Add to my calendar (.ics)</button></div>
-    </div></details>
    </div>
   </div>`;
 }
@@ -995,11 +992,11 @@ function calendarSection() {
 
 /* ============================================================ setlists */
 function slLi(L) {
-  const g = gigOf(L), n = itemsOf(L.id).length, d = g && pd(g.gig_date);
+  const g = gigOf(L), its = itemsOf(L.id).filter(i => i.played), n = its.length, tot = its.reduce((a, i) => a + n0((byId('songs', i.song_id) || {}).length_min), 0), d = g && pd(g.gig_date);
   return `<a class="li" href="#setlist/${L.id}">
     <div class="date">${d ? `<small>${MON[d.getMonth()]}</small><b>${d.getDate()}</b><small>${String(d.getFullYear()).slice(2)}</small>` : '<small>Draft</small>'}</div>
     <div class="grow"><div class="t">${esc(slName(L))}</div><div class="s">${g ? (L.name && L.name !== g.title ? esc(g.title) + ' · ' : '') + esc(g.venue || STATUS_LABEL[g.status] || '') : 'Not assigned to a gig yet'}${L.notes ? ' · ' + esc(L.notes) : ''}</div></div>
-    <span class="small muted">${n} songs</span></a>`;
+    <span class="small muted" style="text-align:right;white-space:nowrap">${n} song${n === 1 ? '' : 's'}${n ? ' · ' + hm(tot) : ''}</span></a>`;
 }
 function setlistsView() {
   const t = todayIso();
@@ -1114,7 +1111,7 @@ function setlistRead(id) {
   ].filter(Boolean);
   return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="back">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
   ${title(slName(L), `Setlist · ${items.length} songs · ${hm(total)} of music`)}
-  <div class="row" style="margin-bottom:14px"><button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button><button class="btn" data-act="sl-edit">Edit</button><button class="btn" data-act="pl-export">Playlist export</button><button class="btn" data-act="set-pdf">Stage PDF</button><button class="btn" data-act="set-text">Copy as text</button></div>
+  <div class="row" style="margin-bottom:14px"><button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button><button class="btn" data-act="sl-edit">Edit</button><button class="btn" data-act="pl-export">Playlist export</button><button class="btn" data-act="set-pdf">Stage PDF</button></div>
   <section class="panel" style="margin-bottom:14px"><div class="kv">${facts.join('')}</div>${L.notes ? `<p style="margin:14px 0 0;white-space:pre-wrap">${esc(L.notes)}</p>` : ''}</section>
   ${setlistSets(L, false)}`;
 }
@@ -1200,7 +1197,7 @@ function setlistEdit(id) {
   <div class="row" style="margin-bottom:14px">
     <select class="in" id="copyFrom" style="width:auto;max-width:260px"><option value="">Copy from another setlist…</option>${others.map(o => { const og = gigOf(o); return `<option value="${o.id}">${esc(slName(o))}${og && og.gig_date ? ' (' + mdY(og.gig_date) + ')' : ' (draft)'}</option>`; }).join('')}</select>
     <span class="spacer"></span>
-    <button class="btn sm gold" data-act="set-pdf">Stage PDF</button><button class="btn sm" data-act="set-text">Copy as text</button>
+    <button class="btn sm gold" data-act="set-pdf">Stage PDF</button>
     <span id="clearWrap"><button class="btn sm danger" data-act="set-clear-ask">Clear</button></span>
   </div>
   <div class="split">
@@ -1443,7 +1440,7 @@ function songView(s) {                                              // condensed
   const parts = ms.filter(m => p[m.name]).map(m => `<span><b>${esc(m.name)}</b> ${esc(p[m.name])}</span>`).join('');
   const rates = S.song_ratings.filter(x => x.song_id === s.id), avg = avgRating(s.id);
   return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop data-songview>
-    <div class="row" style="align-items:flex-start;gap:10px"><div class="grow"><h2 class="sec" style="margin:0;font-size:24px">${esc(s.title)}</h2><div class="muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></div><button class="btn gold" data-act="song-edit-mode" data-id="${s.id}">Edit</button><button class="btn ghost" data-act="modal-close">✕</button></div>
+    <div class="row" style="align-items:flex-start;gap:10px"><div class="grow"><h2 class="sec" style="margin:0;font-size:24px">${esc(s.title)}</h2><div class="muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></div>${(() => { const r = chartFor(s.id); return r ? `<button class="btn gold" data-act="chart-open" data-id="${r.chart.id}">Open chart</button>` : ''; })()}<button class="btn" data-act="song-edit-mode" data-id="${s.id}">Edit</button><button class="btn ghost" data-act="modal-close">✕</button></div>
     <div class="row" style="margin:10px 0 4px;gap:6px;flex-wrap:wrap"><span class="pill" style="color:var(--muted)">${cap(s.status || 'active')}</span>${flags.map(f => `<span class="pill st-confirmed">${f}</span>`).join('')}</div>
     <div class="kv" style="margin-top:12px">${kv('Key', s.song_key ? esc(s.song_key) + (s.capo ? ` · capo ${s.capo}` : '') : '')}${kv('BPM', s.bpm ? String(s.bpm) : '')}${kv('Length', s.length_min ? mins(s.length_min) : '')}${kv('Tuning', esc(s.tuning || 'Standard'))}${kv('Starts it', esc(s.starter || ''))}${kv('Lead vox', esc(s.lead_vox || ''))}${kv('Genre', esc(s.genre || ''))}${kv('Energy', s.energy ? '▮'.repeat(s.energy) + ` <span class="small muted">${s.energy}/5</span>` : '')}${kv('Plays', String(st.plays || 0))}${kv('Last played', st.last ? mdY(st.last) : '—')}</div>
     ${s.comment ? `<p style="margin:14px 0 0;white-space:pre-wrap">${esc(s.comment)}</p>` : ''}
@@ -1544,7 +1541,7 @@ function moneyView() {
         ${yearChart(byYear)}</section>
       <section class="panel"><h2 class="sec">Gigs ${yrSel === 'all' ? '' : yrSel}</h2><div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Date</th><th>Gig</th><th class="r">Pay</th><th class="r">Tips</th><th class="r">Merch</th><th class="r">Total</th><th class="r hide-sm">$/hr</th><th class="r hide-sm">Each</th></tr></thead>
-        <tbody>${rows.map(g => { const ex = expensesFor(g.id); const fund = Math.max(0, gross(g) - ex) * n0(st.band_fund_pct) / 100; return `<tr class="click" data-href="#gig/${g.id}">
+        <tbody>${rows.map(g => { const ex = expensesFor(g.id); const fund = 0; return `<tr class="click" data-href="#gig/${g.id}">
           <td class="num small">${mdY(g.gig_date)}</td><td>${esc(g.title)}</td>
           <td class="r num">${money(pay(g))}</td><td class="r num">${n0(g.tips) ? money(g.tips) : ''}</td><td class="r num">${merchOf(g) ? money(merchOf(g)) : ''}</td>
           <td class="r num"><b>${money(gross(g))}</b></td><td class="r num hide-sm">${g.hours ? money(gross(g) / g.hours) : ''}</td><td class="r num hide-sm">${ms.length ? money((gross(g) - ex - fund) / ms.length) : ''}</td></tr>`; }).join('')}</tbody>
@@ -1641,7 +1638,6 @@ function prefsView() {
       return `<div class="f" style="margin-top:14px;max-width:520px"><span>Weekly digest email</span>
       <label class="check" style="align-items:flex-start"><input type="checkbox" data-digest-on ${off ? '' : 'checked'}><span>Email me the Monday digest<div class="small muted">This week’s gigs and practices, what needs attention, and (for managers) money owed. Sent to ${esc(S.me.email || 'the email on your roster entry — add it under Admin → Roster')}.</div></span></label>
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="digest-preview">Preview</button><button class="btn sm" data-act="digest-test">Send me a test now</button></div></div>`; })()}
-    <div class="small faint" style="margin-top:14px">App version ${APP_V} · <a href="#" data-act="app-refresh">Update app files now</a></div>
     <label class="f" style="margin-top:14px;max-width:320px">Header position (iPad)<select class="in" data-hdr>${[[10, 'Snug'], [32, 'Medium'], [56, 'Low'], [80, 'Lowest']].map(([v, l]) => `<option value="${v}" ${(UI.hdr != null ? UI.hdr : 56) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:14px;max-width:320px">Footer position (iPad)<select class="in" data-ftr>${[[0, 'Lowest'], [6, 'Low'], [14, 'Medium'], [24, 'High'], [34, 'Highest']].map(([v, l]) => `<option value="${v}" ${(UI.fpx != null ? UI.fpx : 14) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:14px;max-width:320px">Text size<select class="in" data-text-size><option value="auto" ${UI.tz == null ? 'selected' : ''}>Auto (a bit larger on iPad)</option><option value="1" ${UI.tz === 1 ? 'selected' : ''}>Normal</option><option value="1.12" ${UI.tz === 1.12 ? 'selected' : ''}>Large</option><option value="1.25" ${UI.tz === 1.25 ? 'selected' : ''}>Extra large</option></select></label>
@@ -1679,17 +1675,23 @@ function activityPanel() {
       return `${head}<div class="li" style="align-items:flex-start"><div class="grow"><div><b>${esc(a.who || 'Someone')}</b> ${verb[a.action] || a.action} ${link(a)}</div>${(a.changes || []).map(c => `<div class="small muted">${esc(c.f)}: ${esc(c.from)} → ${esc(c.to)}</div>`).join('')}</div><span class="small faint" style="white-space:nowrap">${agoText(a.at)}</span></div>`; }).join('') || '<div class="empty">Nothing logged yet — changes from now on show up here.</div>'}</div>
     ${all.length > more ? `<div class="row" style="margin-top:10px"><button class="btn sm" data-act="act-more">Show more</button></div>` : ''}</section>`;
 }
+function displayInfo() {                                             // what this device reports — handy when something looks off only on the iPad
+  const standalone = !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)); let inset = '?';
+  try { const p = document.createElement('div'); p.style.cssText = 'position:absolute;visibility:hidden;padding-top:env(safe-area-inset-top,0px)'; document.body.appendChild(p); inset = Math.round(parseFloat(getComputedStyle(p).paddingTop) || 0) + 'px'; p.remove(); } catch {}
+  return `${standalone ? 'Home Screen app' : 'Browser tab'} · top inset ${inset}`;
+}
 function adminView() {
   const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
   const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}"></label>`;
   return `${title('Admin')}
+  <div class="small faint" style="margin:-6px 0 14px">App version ${APP_V} · ${displayInfo()} · <a href="#" data-act="app-refresh">Update app files now</a></div>
   <div class="grid g2">
     <section class="panel"><div class="row"><h2 class="sec" style="margin:0">Clients</h2><span class="spacer"></span><button class="btn sm gold" data-act="client-new">+ New client</button></div>
       <div class="list" style="margin-top:8px">${S.clients.slice().sort((a, b) => (a.org || a.contact_name || '').localeCompare(b.org || b.contact_name || '')).map(c => { const n = S.gigs.filter(g => g.client_id === c.id).length; return `<div class="li" data-act="client-edit" data-id="${c.id}" style="cursor:pointer"><div class="grow"><div class="t">${esc(c.org || c.contact_name)}</div><div class="s">${esc([c.contact_name, c.email, c.phone].filter(Boolean).join(' · '))}</div></div><span class="small muted">${esc(c.code || '')} · ${n} gig${n === 1 ? '' : 's'}</span></div>`; }).join('') || '<div class="empty">No clients yet — add one here, or from a gig.</div>'}</div>
     </section>
     <section class="panel"><h2 class="sec">Quotes & invoices</h2>
       <div class="fgrid">
-        ${f('band_email', 'Band email', 'w2')}${f('default_terms', 'Terms')}${f('quote_valid_days', 'Quote good for (days)', '', 'number')}
+        ${f('band_email', 'Band email', 'w4')}${f('default_terms', 'Terms', 'w2')}${f('quote_valid_days', 'Good for (d)', 'w2', 'number')}
         ${f('default_description', 'Description', 'w4')}
         ${f('default_line_item', 'Line item — {hours} fills in', 'w4')}
         ${f('default_line_note', 'Line note', 'w4')}
@@ -1699,7 +1701,6 @@ function adminView() {
       <div class="fgrid">
         ${f('remind_setlist_days', 'Setlist due (days before)', 'w2', 'number')}${f('remind_quote_days', 'Quote follow-up (days)', 'w2', 'number')}
         ${f('set_target_min', 'Set length target (min)', 'w2', 'number')}${f('song_buffer_sec', 'Between songs (sec)', 'w2', 'number')}
-        ${f('band_fund_pct', 'Band fund % of each gig', 'w2', 'number')}
       </div>
       <div class="row" style="margin-top:12px"><button class="btn gold sm" data-act="save-settings">Save settings</button></div>
     </section>
@@ -1964,9 +1965,9 @@ function chartBox(s, ro) {
   const nm = id => (byId('members', id) || {}).name || 'A bandmate', using = res ? res.chart.member_id : null;
   const row = (label, right, on) => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line-soft);gap:8px;flex-wrap:wrap"><div class="grow"><b>${label}</b>${on ? ' <span class="pill st-confirmed">In use</span>' : ''}</div>${right}</div>`;
   return `<div id="chartBox">
-    ${row('My chart', ro ? (mine ? `<span class="small muted">${esc(mine.filename || 'chart.pdf')}</span><button class="btn sm" data-act="chart-open" data-id="${mine.id}">Open</button>` : '<span class="small muted">none yet</span>') : mine ? `<span class="small muted">${esc(mine.filename || 'chart.pdf')}</span><button class="btn sm" data-act="chart-open" data-id="${mine.id}">Open</button><label class="btn sm" style="cursor:pointer">Replace<input type="file" accept="application/pdf" hidden data-chart-up="${s.id}"></label><button class="btn sm danger" data-act="chart-del" data-id="${mine.id}">Remove</button>`
+    ${row('My chart', ro ? (mine ? `<span class="small muted">${esc(mine.filename || 'chart.pdf')}</span>${using === me.id ? '' : `<button class="btn sm" data-act="chart-open" data-id="${mine.id}">Open</button>`}` : '<span class="small muted">none yet</span>') : mine ? `<span class="small muted">${esc(mine.filename || 'chart.pdf')}</span><button class="btn sm" data-act="chart-open" data-id="${mine.id}">Open</button><label class="btn sm" style="cursor:pointer">Replace<input type="file" accept="application/pdf" hidden data-chart-up="${s.id}"></label><button class="btn sm danger" data-act="chart-del" data-id="${mine.id}">Remove</button>`
       : `<label class="btn sm gold" style="cursor:pointer">Upload my PDF<input type="file" accept="application/pdf" hidden data-chart-up="${s.id}"></label>`, using === me.id)}
-    ${others.map(c => row(`${esc(nm(c.member_id))}’s chart`, `<button class="btn sm" data-act="chart-open" data-id="${c.id}">Open</button>${ro || using === c.member_id ? '' : `<button class="btn sm" data-act="chart-use" data-sid="${s.id}" data-m="${c.member_id}">Use theirs</button>`}`, using === c.member_id)).join('')}
+    ${others.map(c => row(`${esc(nm(c.member_id))}’s chart`, `${ro && using === c.member_id ? '' : `<button class="btn sm" data-act="chart-open" data-id="${c.id}">Open</button>`}${ro || using === c.member_id ? '' : `<button class="btn sm" data-act="chart-use" data-sid="${s.id}" data-m="${c.member_id}">Use theirs</button>`}`, using === c.member_id)).join('')}
     ${!ro && mine && using !== me.id ? `<div class="row" style="padding-top:8px"><button class="btn sm" data-act="chart-use" data-sid="${s.id}" data-m="own">Use my own instead</button></div>` : ''}
     ${!res ? `<p class="small muted" style="margin:8px 0 0">${ro ? 'No chart yet — tap Edit to upload yours or use a bandmate’s.' : 'No chart yet — upload yours, or use a bandmate’s once they add theirs.'}</p>` : ''}
   </div>`;

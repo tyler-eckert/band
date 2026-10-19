@@ -1,4 +1,4 @@
-Trailer Folk HQ - latest full set (rev 41, index.html loads app.js?v=52)
+Trailer Folk HQ - latest full set (rev 42, index.html loads app.js?v=53)
 
 PUSH TO GITHUB (repo root, replacing the old copies):
   index.html, app.js, sw.js
@@ -12,13 +12,13 @@ RUN IN SUPABASE (SQL Editor; each is safe to re-run; skip any you've already run
 
 DEPLOY (Supabase Edge Functions, JWT verification OFF for both):
   supabase/functions/band-calendar/index.ts   CHANGED - deleted gigs stay off the calendar
-  supabase/functions/band-digest/index.ts     NEW - weekly digest email. Secrets: RESEND_API_KEY + DIGEST_FROM, or GMAIL_USER + GMAIL_APP_PASSWORD
+  supabase/functions/band-digest/index.ts     CHANGED - no long dashes, encoding-proof. Weekly digest email. Secrets: RESEND_API_KEY + DIGEST_FROM, or GMAIL_USER + GMAIL_APP_PASSWORD
 
 NOT INCLUDED (keep your existing copies): CNAME, assets/, vendor/
 
 Checksums:
-59cc41acb98e06f54c76b4ec36ba0a8e  ./app.js
-c7c88b1259deaaf8fc5b64ad2be1961a  ./index.html
+eb7d11c316c7a43ad45ff0b9b177c7ce  ./app.js
+411e143c63094cf6cba3e2e25f36dff5  ./index.html
 96de323330f8b8336f637a0051835e00  ./pdf.min.js
 a53a71a2a5d618ed0f86ebf099db032a  ./pdf.worker.min.js
 2ee41112a44fe7014dce33e26468ba93  ./pdfjs-LICENSE.txt
@@ -39,5 +39,5 @@ e80056b654f6ac0e441727569df992fc  ./supabase/14_checklist_na.sql
 14ef7bb08c4e383986a6f02162bca6cd  ./supabase/15_trash_activity_daysheet.sql
 451cafbeeceafee87cc58caa50983e3b  ./supabase/16_digest_cron.sql
 5e0f1a1f5ac7a7de803c8cfd835644fb  ./supabase/functions/band-calendar/index.ts
-b313492cc57bd5a98977294eaf69b485  ./supabase/functions/band-digest/index.ts
+783563675360d4573f2aec11481d591e  ./supabase/functions/band-digest/index.ts
 ab8991726a19563ae673cc90ffab489d  ./sw.js
