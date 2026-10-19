@@ -6,6 +6,8 @@
 <title>Trailer Folk HQ</title>
 <meta name="theme-color" content="#0e0a01">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">   <!-- opaque status bar: iPadOS's translucent glass over the top edge was smearing the header -->
 <meta name="apple-mobile-web-app-title" content="TF HQ">
 <link rel="icon" type="image/png" href="assets/icon.png">
@@ -439,6 +441,9 @@ body.offline .grip{display:none}
 body.song-dragging{-webkit-user-select:none;user-select:none;cursor:grabbing}
 @container (max-width:600px){ .song.editable{grid-template-columns:44px 22px minmax(0,1fr)} .song.editable .acts{grid-column:3/-1;justify-content:flex-start;opacity:1;margin:-6px 0 0 -10px} }
 .song.editable .n{text-align:center}
+.who-menu{display:flex;flex-direction:column;gap:6px;min-width:176px}
+.who-menu .btn{width:100%;text-align:left}
+#gigMode.gm-doc #gmPenBtn,#gigMode.gm-doc [data-gm=list]{display:none}
 </style>
 </head>
 <body>
@@ -446,6 +451,6 @@ body.song-dragging{-webkit-user-select:none;user-select:none;cursor:grabbing}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=53"></script>
+<script src="app.js?v=55"></script>
 </body>
 </html>

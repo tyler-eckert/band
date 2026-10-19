@@ -1,7 +1,9 @@
-Trailer Folk HQ - latest full set (rev 42, index.html loads app.js?v=53)
+Trailer Folk HQ - latest full set (rev 44, index.html loads app.js?v=55)
 
 PUSH TO GITHUB (repo root, replacing the old copies):
   index.html, app.js, sw.js
+  HQ-Member-Guide.pdf, HQ-Quick-Start.pdf   NEW - the Training docs in the photo menu
+  manifest.webmanifest, hq-icon-192.png, hq-icon-512.png, hq-icon-maskable-512.png   NEW - lets Android install HQ as a real app (repo ROOT, next to index.html)
   pdf.min.js, pdf.worker.min.js        (PDF viewer for gig mode; pdf.js 3.11.174, Apache-2.0, license in pdfjs-LICENSE.txt)
 
 RUN IN SUPABASE (SQL Editor; each is safe to re-run; skip any you've already run):
@@ -16,9 +18,19 @@ DEPLOY (Supabase Edge Functions, JWT verification OFF for both):
 
 NOT INCLUDED (keep your existing copies): CNAME, assets/, vendor/
 
+TRAINING DOCS (new - the photo menu opens these inside the app; put them at the repo ROOT with exactly these names):
+  HQ-Member-Guide.pdf    17-page guide: install (iPhone/iPad/Android), every feature, troubleshooting
+  HQ-Quick-Start.pdf     one page to text to a new member
+
 Checksums:
-eb7d11c316c7a43ad45ff0b9b177c7ce  ./app.js
-411e143c63094cf6cba3e2e25f36dff5  ./index.html
+58d5c1d5cde175c48e97b43a312b3b03  ./HQ-Member-Guide.pdf
+dad44861a16e7cbce3caeed84e24db3a  ./HQ-Quick-Start.pdf
+8be1baaa914ac7d17dbb323b84a9d482  ./app.js
+13b41edc04b81f888d0aaa792d8b8a40  ./hq-icon-192.png
+9d294fe8193f6b3b9a407cde932a4352  ./hq-icon-512.png
+3e3e42b9b8729c4812e2c269ec5ff0d8  ./hq-icon-maskable-512.png
+6f92a0e477bc8bf05bb1a306d701adfb  ./index.html
+6f7c1915939267af39760aa7b066f649  ./manifest.webmanifest
 96de323330f8b8336f637a0051835e00  ./pdf.min.js
 a53a71a2a5d618ed0f86ebf099db032a  ./pdf.worker.min.js
 2ee41112a44fe7014dce33e26468ba93  ./pdfjs-LICENSE.txt
