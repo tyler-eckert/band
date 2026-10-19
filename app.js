@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 56;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 58;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -443,13 +443,41 @@ window.addEventListener('hashchange', () => { if (S.dirty && !confirmLeave()) re
 function confirmLeave() { S.dirty = false; return true; }
 
 /* ============================================================ login */
-const INQ = {
-  events: ['Wedding or reception', 'Private party', 'Corporate event', 'Fundraiser or nonprofit', 'Festival or public event', 'Brewery or venue show', 'Other'],
-  hours: ['1', '1.5', '2', '2.5', '3', '4', 'Not sure yet'], yesno: ['Yes', 'No', 'Not sure'],
-  budgets: ['Under $1,500', '$1,500 - $2,000', '$2,000 - $2,500', '$2,500 - $3,500', '$3,500+', 'Not sure yet'],
-  guests: ['Under 50', '50 - 100', '100 - 250', '250 - 500', '500+', 'Not sure'], settings: ['Indoor', 'Outdoor', 'Both or not sure'],
-  heard: ['Referral from a friend', 'Saw you at an event', 'Instagram', 'YouTube', 'Google search', 'A venue recommended you', 'Other'], prefs: ['Email', 'Text', 'Call'],
+const INQ_ORDER = ['pref', 'event', 'hours', 'outside', 'budget', 'guests', 'setting', 'power', 'heard'];
+const INQ_BODY = { pref: 'contact_pref', event: 'event_type', hours: 'hours', outside: 'outside_okc', budget: 'budget', guests: 'guests', setting: 'setting', power: 'power', heard: 'heard_from' };
+const INQ_DEFAULT = {
+  intro: 'Tell us about your event and we’ll reply with availability and a quote, usually within two business days.',
+  note: 'Trailer Folk brings all the sound and lighting. We just need a power source and a place to set up.',
+  fields: {
+    pref: { label: 'Best way to reach you', show: true, required: false, options: ['Email', 'Text', 'Call'] },
+    event: { label: 'Type of event', show: true, required: true, options: ['Wedding or reception', 'Private party', 'Corporate event', 'Fundraiser or nonprofit', 'Festival or public event', 'Brewery or venue show', 'Other'] },
+    hours: { label: 'Hours of live music (3 max)', show: true, required: false, options: ['1', '1.5', '2', '2.5', '3', 'Not sure yet'] },
+    outside: { label: 'Outside the OKC metro?', show: true, required: false, options: ['Yes', 'No', 'Not sure'] },
+    budget: { label: 'Budget', show: true, required: false, options: ['Under $1,500', '$1,500 - $2,000', '$2,000 - $2,500', '$2,500 - $3,500', '$3,500+', 'Not sure yet'] },
+    guests: { label: 'Expected guests', show: true, required: false, options: ['Under 50', '50 - 100', '100 - 250', '250 - 500', '500+', 'Not sure'] },
+    setting: { label: 'Indoor or outdoor?', show: true, required: false, options: ['Indoor', 'Outdoor', 'Both or not sure'] },
+    power: { label: 'Is power available at the venue?', show: true, required: false, options: ['Yes', 'No', 'Not sure'] },
+    heard: { label: 'How did you hear about us?', show: true, required: false, options: ['Referral from a friend', 'Saw you at an event', 'Instagram', 'YouTube', 'Google search', 'A venue recommended you', 'Other'] },
+  },
 };
+function inqMerge(stored) {                                            // saved settings laid over the built-in defaults (same rules as the server)
+  const d = JSON.parse(JSON.stringify(INQ_DEFAULT)); if (!stored || typeof stored !== 'object') return d;
+  if (typeof stored.intro === 'string') d.intro = stored.intro.slice(0, 400); if (typeof stored.note === 'string') d.note = stored.note.slice(0, 400);
+  for (const k of INQ_ORDER) {
+    const s = stored.fields && stored.fields[k]; if (!s || typeof s !== 'object') continue; const f = d.fields[k];
+    if (typeof s.label === 'string' && s.label.trim()) f.label = s.label.trim().slice(0, 80);
+    if (typeof s.show === 'boolean') f.show = s.show; if (typeof s.required === 'boolean') f.required = s.required;
+    if (Array.isArray(s.options)) { const o = [...new Set(s.options.map(x => String(x).trim().slice(0, 60)).filter(Boolean))].slice(0, 30); if (o.length) f.options = o; }
+  }
+  return d;
+}
+const INQ_LIVE = { cfg: null, state: 'idle' }; let INQ_ACTIVE = null;
+function inqLoad() {                                                   // visitors get the live form; if it can't be reached, the built-in one
+  if (INQ_LIVE.state !== 'idle') return; INQ_LIVE.state = 'loading';
+  const done = cfg => { INQ_LIVE.cfg = cfg; INQ_LIVE.state = 'done'; if (!S.session && pubView() === 'contact') render(); };
+  const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 3500);
+  fetch(`${SUPABASE_URL}/functions/v1/band-inquiry?config=1`, { signal: ctl.signal, headers: { apikey: SUPABASE_KEY } }).then(r => r.ok ? r.json() : null).then(j => done(inqMerge(j && j.fields ? j : null))).catch(() => done(inqMerge(null))).finally(() => clearTimeout(to));
+}
 const PRESS_KIT = 'Trailer-Folk-Press-Kit.pdf';
 const pubView = () => { const h = (location.hash || '').slice(1).split('/')[0]; return h === 'login' ? 'login' : h === 'contact' ? 'contact' : 'home'; };
 const BAND_EMAIL_PUB = 'TrailerFolkBand@gmail.com';
@@ -465,7 +493,11 @@ function loginView() {
         <div class="row"><button class="btn gold" type="submit">Sign in</button></div>
         <p class="small" id="lgMsg" style="color:var(--bad);min-height:1.5em"></p>
       </div></form></div>`;
-  if (v === 'contact') { if (!UI.pubShown) UI.pubShown = Date.now(); return `<div class="login">${ph}<div class="fm wide">${back}<img src="assets/logo.png" alt="Trailer Folk">${UI.pubSent ? thanksView() : contactView()}</div></div>`; }
+  if (v === 'contact') {
+    if (!INQ_LIVE.cfg) inqLoad();
+    if (!INQ_LIVE.cfg) return `<div class="login">${ph}<div class="fm wide">${back}<img src="assets/logo.png" alt="Trailer Folk"><p class="muted">Loading…</p></div></div>`;
+    if (!UI.pubShown) UI.pubShown = Date.now(); return `<div class="login">${ph}<div class="fm wide">${back}<img src="assets/logo.png" alt="Trailer Folk">${UI.pubSent ? thanksView() : contactView(INQ_LIVE.cfg)}</div></div>`;
+  }
   return `<div class="login">${ph}
     <div class="fm pub"><img src="assets/logo.png" alt="Trailer Folk">
       <h1 class="echo disp" style="margin:0 0 .35em"><span class="solid">Trailer Folk</span></h1>
@@ -477,36 +509,32 @@ function loginView() {
         <a class="btn big gold" href="#contact">Contact Us</a>
       </div>${social}</div></div>`;
 }
-function contactView() {
-  const sel = (id, label, list, req, cls = '') => `<label class="f ${cls}">${label}${req ? ' *' : ''}<select class="in" id="${id}" ${req ? 'required' : ''}><option value="">Select…</option>${list.map(x => `<option>${esc(x)}</option>`).join('')}</select></label>`;
-  return `${title('Book Trailer Folk')}
-    <p class="muted" style="margin:-10px 0 18px;max-width:560px">Tell us about your event and we’ll reply with availability and a quote, usually within two business days. Prefer email? <a href="mailto:${BAND_EMAIL_PUB}">${BAND_EMAIL_PUB}</a></p>
-    <form id="contactForm" novalidate><div class="fgrid">
+function contactView(cfg, opts = {}) {
+  cfg = cfg || inqMerge(null); INQ_ACTIVE = cfg;
+  const sel = k => { const f = cfg.fields[k]; if (!f.show) return ''; return `<label class="f w2">${esc(f.label)}${f.required ? ' *' : ''}<select class="in" id="ct_${k}" ${f.required ? 'required' : ''}><option value="">Select…</option>${f.options.map(x => `<option>${esc(x)}</option>`).join('')}</select></label>`; };
+  return `${title('Book Trailer Folk')}${opts.preview ? '<p class="small" style="color:var(--gold);margin:-8px 0 10px">Preview only — nothing here is sent.</p>' : ''}
+    <p class="muted" style="margin:-10px 0 18px;max-width:560px">${esc(cfg.intro)} Prefer email? <a href="mailto:${BAND_EMAIL_PUB}">${BAND_EMAIL_PUB}</a></p>
+    <form id="contactForm" novalidate ${opts.preview ? 'data-preview="1"' : ''}><div class="fgrid">
       <label class="f w2">Your name *<input class="in" id="ctName" autocomplete="name" required></label>
-      ${sel('ctPref', 'Best way to reach you', INQ.prefs, false, 'w2')}
+      ${sel('pref')}
       <label class="f w2">Email<input class="in" id="ctEmail" type="email" inputmode="email" autocomplete="email"></label>
       <label class="f w2">Phone<input class="in" id="ctPhone" type="tel" inputmode="tel" autocomplete="tel"></label>
       <p class="small muted w4" style="margin:-4px 0 0">Add at least one: an email or a phone number.</p>
-      ${sel('ctEvent', 'Type of event', INQ.events, true, 'w2')}
+      ${sel('event')}
       <label class="f w2">Event date *<input class="in" id="ctDate" type="date" required></label>
       <label class="check w2" style="align-self:end"><input type="checkbox" id="ctNoDate"><span>I don’t have a date yet</span></label>
       <label class="check w2" style="align-self:end"><input type="checkbox" id="ctFlex"><span>My date is flexible</span></label>
       <label class="f w2">Preferred start time<input class="in" id="ctStart" placeholder="e.g. 7pm"></label>
-      ${sel('ctHours', 'Hours of live music', INQ.hours, false, 'w2')}
+      ${sel('hours')}
       <label class="f w2">Venue or location name<input class="in" id="ctVenue" autocomplete="off"></label>
       <label class="f w2">City *<input class="in" id="ctCity" autocomplete="address-level2" required></label>
-      ${sel('ctOutside', 'Outside the OKC metro?', INQ.yesno, false, 'w2')}
-      ${sel('ctBudget', 'Budget', INQ.budgets, false, 'w2')}
-      ${sel('ctGuests', 'Expected guests', INQ.guests, false, 'w2')}
-      ${sel('ctSetting', 'Indoor or outdoor?', INQ.settings, false, 'w2')}
-      ${sel('ctPower', 'Is power available at the venue?', INQ.yesno, false, 'w2')}
-      ${sel('ctHeard', 'How did you hear about us?', INQ.heard, false, 'w2')}
+      ${['outside', 'budget', 'guests', 'setting', 'power', 'heard'].map(sel).join('')}
       <label class="f w4">Anything else we should know?<textarea class="in" id="ctMsgText" rows="4" placeholder="Songs you love, ceremony or dinner timing, sound limits, load-in details…"></textarea></label>
       <label class="hp" aria-hidden="true">Website<input id="ctWebsite" tabindex="-1" autocomplete="off"></label>
     </div>
-    <p class="small muted" style="margin:14px 0 4px">Trailer Folk brings all the sound and lighting. We just need a power source and a place to set up.</p>
+    ${cfg.note ? `<p class="small muted" style="margin:14px 0 4px">${esc(cfg.note)}</p>` : ''}
     <div class="row" style="margin-top:10px"><button class="btn gold big" type="submit" id="ctSend">Send request</button></div>
-    <p class="small" id="ctMsg" style="color:var(--bad);min-height:1.5em;margin-top:8px"></p></form>${'<div class="pub-social small muted">Questions first? <a href="mailto:' + BAND_EMAIL_PUB + '">' + BAND_EMAIL_PUB + '</a></div>'}`;
+    <p class="small" id="ctMsg" style="color:var(--bad);min-height:1.5em;margin-top:8px"></p></form><div class="pub-social small muted">Questions first? <a href="mailto:${BAND_EMAIL_PUB}">${BAND_EMAIL_PUB}</a></div>`;
 }
 function thanksView() {
   return `${title('Thank you!')}<div class="card-ish"><p style="font-size:17px;margin:0 0 10px">Thanks${UI.pubSent && UI.pubSent !== true ? ', ' + esc(UI.pubSent) : ''} &mdash; we got your request.</p>
@@ -516,10 +544,10 @@ function thanksView() {
 async function sendInquiry() {
   const msg = $('#ctMsg'), btn = $('#ctSend'); msg.textContent = ''; const val = id => { const el = $('#' + id); return el ? el.value.trim() : ''; };
   const email = val('ctEmail'), phone = val('ctPhone'), noDate = $('#ctNoDate').checked;
-  const miss = []; if (val('ctName').length < 2) miss.push('your name'); if (!email && phone.replace(/\D/g, '').length < 7) miss.push('an email or phone number'); if (!val('ctEvent')) miss.push('the type of event'); if (!noDate && !val('ctDate')) miss.push('the event date (or tick “I don’t have a date yet”)'); if (!val('ctCity')) miss.push('the city');
+  const miss = []; if (val('ctName').length < 2) miss.push('your name'); if (!email && phone.replace(/\D/g, '').length < 7) miss.push('an email or phone number'); const cfg = INQ_ACTIVE || inqMerge(null); for (const k of INQ_ORDER) { const f = cfg.fields[k]; if (f.show && f.required && !val('ct_' + k)) miss.push('“' + f.label.replace(/[?:\s]+$/, '') + '”'); } if (!noDate && !val('ctDate')) miss.push('the event date (or tick “I don’t have a date yet”)'); if (!val('ctCity')) miss.push('the city');
   if (miss.length) { msg.textContent = 'Please add ' + miss.join(', ') + '.'; return; }
-  const body = { name: val('ctName'), email, phone, contact_pref: val('ctPref'), event_type: val('ctEvent'), event_date: noDate ? '' : val('ctDate'), no_date: noDate, date_flex: $('#ctFlex').checked, start_time: val('ctStart'), hours: val('ctHours'), venue: val('ctVenue'), city: val('ctCity'),
-    outside_okc: val('ctOutside'), budget: val('ctBudget'), guests: val('ctGuests'), setting: val('ctSetting'), power: val('ctPower'), heard_from: val('ctHeard'), message: val('ctMsgText'), website: val('ctWebsite'), ms: Date.now() - (UI.pubShown || Date.now()) };
+  const body = { name: val('ctName'), email, phone, event_date: noDate ? '' : val('ctDate'), no_date: noDate, date_flex: $('#ctFlex').checked, start_time: val('ctStart'), venue: val('ctVenue'), city: val('ctCity'), message: val('ctMsgText'), website: val('ctWebsite'), ms: Date.now() - (UI.pubShown || Date.now()) };
+  for (const k of INQ_ORDER) body[INQ_BODY[k]] = val('ct_' + k);
   btn.disabled = true; btn.textContent = 'Sending…';
   try {
     const r = await fetch(`${SUPABASE_URL}/functions/v1/band-inquiry`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY }, body: JSON.stringify(body) });
@@ -1763,6 +1791,26 @@ function displayInfo() {                                             // what thi
   try { const p = document.createElement('div'); p.style.cssText = 'position:absolute;visibility:hidden;padding-top:env(safe-area-inset-top,0px)'; document.body.appendChild(p); inset = Math.round(parseFloat(getComputedStyle(p).paddingTop) || 0) + 'px'; p.remove(); } catch {}
   return `${standalone ? 'Home Screen app' : 'Browser tab'} · top inset ${inset}`;
 }
+function contactFormPanel() {
+  const st = settings(), cfg = inqMerge(st.inquiry_form), missing = st && Object.keys(st).length && !('inquiry_form' in st);
+  const card = k => { const f = cfg.fields[k]; return `<div class="card" data-inq-card="${k}"><div class="row" style="gap:10px;flex-wrap:wrap"><input class="in grow" data-inq="label" data-k="${k}" value="${esc(f.label)}" aria-label="Question" style="min-width:180px;font-weight:700"><label class="check"><input type="checkbox" data-inq="show" data-k="${k}" ${f.show ? 'checked' : ''}><span>Show</span></label><label class="check"><input type="checkbox" data-inq="required" data-k="${k}" ${f.required ? 'checked' : ''}><span>Required</span></label></div>
+    <textarea class="in" rows="${Math.min(10, Math.max(4, f.options.length + 1))}" data-inq="options" data-k="${k}" style="margin-top:10px" aria-label="Choices, one per line">${esc(f.options.join('\n'))}</textarea><div class="small muted" style="margin-top:4px">One choice per line, in the order people see them.</div></div>`; };
+  return `<section class="panel" style="grid-column:1/-1" id="inqPanel"><div class="row" style="flex-wrap:wrap"><h2 class="sec" style="margin:0">Contact form</h2><span class="small muted">the Contact Us page on the front screen</span><span class="spacer"></span><button class="btn sm" data-act="inq-preview">Preview</button><button class="btn sm gold" data-act="inq-save">Save changes</button></div>
+    <p class="small muted" style="margin:8px 0 12px">Edit the questions and their dropdown choices. Changes go live the moment you save. Always asked: name, email or phone, event date, city, venue, start time and a message box. Past inquiries keep the answers they were sent with.</p>
+    ${missing ? '<p class="small" style="color:var(--gold)">Run the latest SQL update (18) so these changes can be saved.</p>' : ''}
+    <div class="fgrid" style="margin-bottom:12px"><label class="f w4">Intro text<textarea class="in" rows="2" data-inq="intro">${esc(cfg.intro)}</textarea></label><label class="f w4">Note under the form (leave empty to hide)<input class="in" data-inq="note" value="${esc(cfg.note)}"></label></div>
+    <div class="inq-grid">${INQ_ORDER.map(card).join('')}</div>
+    <div class="row" style="margin-top:14px"><button class="btn gold" data-act="inq-save">Save changes</button><button class="btn" data-act="inq-preview">Preview</button><span class="spacer"></span><button class="btn danger sm" data-act="inq-reset">Reset to defaults</button></div></section>`;
+}
+function inqCollect() {                                                // what's on screen right now (saved or not)
+  const cfg = { intro: ($('[data-inq="intro"]') || {}).value || '', note: ($('[data-inq="note"]') || {}).value || '', fields: {} };
+  INQ_ORDER.forEach(k => { const g = n => $(`[data-inq="${n}"][data-k="${k}"]`); cfg.fields[k] = { label: g('label').value.trim(), show: g('show').checked, required: g('required').checked, options: [...new Set(g('options').value.split('\n').map(x => x.trim().slice(0, 60)).filter(Boolean))] }; });
+  return cfg;
+}
+function inqProblems(cfg) {
+  const bad = []; INQ_ORDER.forEach(k => { const f = cfg.fields[k]; if (!f.label) bad.push(`Give “${INQ_DEFAULT.fields[k].label}” a question.`); else if (f.show && !f.options.length) bad.push(`“${f.label}” needs at least one choice (or untick Show).`); if (f.options.length > 30) bad.push(`“${f.label}” has more than 30 choices.`); });
+  return bad;
+}
 function adminView() {
   const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
   const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}"></label>`;
@@ -1796,6 +1844,7 @@ function adminView() {
         <label class="f w4">Check note<input class="in" data-p="${p.id}" data-k="check_note" value="${esc(p.check_note || '')}"></label></div>`).join('')}
       <div class="row"><button class="btn gold sm" data-act="save-payees">Save pay-to</button><button class="btn sm" data-act="payee-new">+ Pay-to</button></div>
     </section>
+    ${contactFormPanel()}
     ${mgr ? `<section class="panel" style="grid-column:1/-1"><h2 class="sec">Roster & logins</h2>
       <p class="small muted" style="margin-top:0">Each person signs in with the email listed here. Create their login in Supabase → Authentication → Users (same email).</p>
       <table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Linked</th></tr></thead><tbody>
@@ -2483,7 +2532,7 @@ document.addEventListener('change', async e => {
 });
 
 document.addEventListener('submit', async e => {
-  if (e.target.id === 'contactForm') { e.preventDefault(); return sendInquiry(); }
+  if (e.target.id === 'contactForm') { e.preventDefault(); if (e.target.dataset.preview) return toast('Preview only — nothing was sent.'); return sendInquiry(); }
   if (e.target.id !== 'loginForm') return; e.preventDefault();
   const msg = $('#lgMsg'); msg.textContent = '';
   try { await api.signIn($('#lgEmail').value.trim(), $('#lgPass').value); } catch (err) { msg.textContent = err.message; }
@@ -2601,6 +2650,15 @@ const ACTIONS = {
     openModal(`<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(680px,100%)"><div class="row"><h2 class="sec" style="margin:0">Digest preview</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div><p class="small muted" style="margin:8px 0">${esc(r.subject)}</p><iframe sandbox="" style="width:100%;height:62vh;border:1px solid var(--line);border-radius:10px;background:#fff" srcdoc="${r.html.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></iframe></div></div>`);
   },
   'digest-test': async () => { if (!S.me.email) return toast('Add your email under Admin → Roster first.', true); const r = await digestCall('test=' + encodeURIComponent(S.me.email)); if (r) toast(r.failed && r.failed.length ? 'Failed: ' + r.failed[0] : `Test digest sent to ${(r.sent || [])[0] || S.me.email}`, !!(r.failed && r.failed.length)); },
+  'inq-preview': () => {
+    const cfg = inqCollect(), bad = inqProblems(cfg); if (bad.length) return toast(bad[0], true);
+    openModal(`<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(780px,100%)"><div class="row"><span class="pill g">Preview</span><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div><div class="inq-prev">${contactView(inqMerge(cfg), { preview: true })}</div></div></div>`);
+  },
+  'inq-save': async () => {
+    const cfg = inqCollect(), bad = inqProblems(cfg); if (bad.length) return toast(bad[0], true);
+    if (await guard(() => save('settings', { ...settings(), inquiry_form: cfg }), 'Contact form updated — it’s live now')) { INQ_LIVE.state = 'idle'; INQ_LIVE.cfg = null; render(); }
+  },
+  'inq-reset': async () => { if (!confirm('Put the Contact form back to the built-in questions and choices?')) return; if (await guard(() => save('settings', { ...settings(), inquiry_form: null }), 'Contact form reset')) render(); },
   'search-open': () => openSearch(),
   'pub-again': () => { UI.pubSent = null; location.hash = ''; render(); },
   'training': () => {
