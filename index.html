@@ -358,6 +358,19 @@ body.offline [data-text-size]{pointer-events:auto;opacity:1}
 main{padding-bottom:72px}
 /* iPad: header a little lower than the bare minimum, footer lower */
 @media (min-width:700px){ .top{padding-top:calc(env(safe-area-inset-top,0px) + var(--hdr,56px))} .tabbar{bottom:-24px;padding-bottom:calc(24px + var(--ftr,14px))} }   /* --ftr = how far the icons sit above the screen edge */
+/* ---------- pencil markup ---------- */
+.gm-pg{position:relative;flex:none;margin:0 auto}
+.gm-ov{position:absolute;inset:0;pointer-events:none}
+.gm-pen .gm-ov{pointer-events:auto;touch-action:none;cursor:crosshair}
+.gm-pen .gm-view{touch-action:none}
+.gm-btn.on{background:var(--gold);color:#140e02;border-color:var(--gold)}
+.gm-tools{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;background:#1d1608;border-bottom:1px solid var(--line-soft)}
+.gm-tools[hidden]{display:none}
+.gm-sw{width:38px;height:38px;border-radius:50%;border:3px solid transparent;background:var(--c);box-shadow:0 0 0 1px var(--line)}
+.gm-sw.on{border-color:var(--gold)}
+.gm-tb{min-height:38px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:rgba(243,238,228,.08);color:var(--cream);font-weight:700;font-size:14px;font-family:inherit}
+.gm-tb.on{background:var(--gold);color:#140e02;border-color:var(--gold)}
+.gm-tb.done{background:rgba(255,191,67,.16);color:var(--gold)}
 </style>
 </head>
 <body>
@@ -365,6 +378,6 @@ main{padding-bottom:72px}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=32"></script>
+<script src="app.js?v=35"></script>
 </body>
 </html>
