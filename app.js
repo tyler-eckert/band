@@ -1346,7 +1346,10 @@ function settingsView() {
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
     <div class="f" style="margin-top:14px;max-width:460px"><span>Page-turner pedal</span>
       <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn sm" data-act="ped-learn" data-v="next">Teach “next”</button><button class="btn sm" data-act="ped-learn" data-v="prev">Teach “previous”</button><button class="btn sm ghost" data-act="ped-reset">Reset</button></div>
-      <div class="small muted" id="pedStatus" style="margin-top:8px">Press a pedal switch — if nothing appears here, the iPad isn’t receiving keys from it (check the pedal’s mode).${UI.ped && (UI.ped.next || []).length ? ` Learned: next = ${esc(UI.ped.next[0].k)}${(UI.ped.prev || []).length ? ', previous = ' + esc(UI.ped.prev[0].k) : ''}.` : ''}</div></div>
+      <div class="small muted" id="pedStatus" style="margin-top:8px">Press a pedal switch — everything the iPad receives shows below. If nothing appears, the iPad isn’t getting anything from it (check the pedal’s mode and pairing).${UI.ped && (UI.ped.next || []).length ? ` Learned: next = ${esc(UI.ped.next[0].k)}${(UI.ped.prev || []).length ? ', previous = ' + esc(UI.ped.prev[0].k) : ''}.` : ''}</div>
+      <pre id="pedLog" class="small" style="margin:6px 0 0;padding:8px 10px;background:rgba(243,238,228,.05);border-radius:8px;min-height:3.4em;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace">${esc((S._pedLines || []).join('\n'))}</pre>
+      <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
+      <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
     <label class="f" style="margin-top:14px;max-width:320px">Header position (iPad)<select class="in" data-hdr>${[[10, 'Snug'], [32, 'Medium'], [56, 'Low'], [80, 'Lowest']].map(([v, l]) => `<option value="${v}" ${(UI.hdr != null ? UI.hdr : 56) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:14px;max-width:320px">Footer position (iPad)<select class="in" data-ftr>${[[0, 'Lowest'], [6, 'Low'], [14, 'Medium'], [24, 'High'], [34, 'Highest']].map(([v, l]) => `<option value="${v}" ${(UI.fpx != null ? UI.fpx : 14) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:14px;max-width:320px">Text size<select class="in" data-text-size><option value="auto" ${UI.tz == null ? 'selected' : ''}>Auto (a bit larger on iPad)</option><option value="1" ${UI.tz === 1 ? 'selected' : ''}>Normal</option><option value="1.12" ${UI.tz === 1.12 ? 'selected' : ''}>Large</option><option value="1.25" ${UI.tz === 1.25 ? 'selected' : ''}>Extra large</option></select></label>
@@ -1797,11 +1800,12 @@ function openGigMode(seq, lid, opts = {}) {
   d.addEventListener('selectstart', e => e.preventDefault()); d.setAttribute('tabindex', '-1'); try { d.focus({ preventScroll: true }); } catch {}
   const gv = d.querySelector('#gmView'); ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach(t => gv.addEventListener(t, gmPtr)); gv.addEventListener('contextmenu', e => { if (GMK.on) e.preventDefault(); });
   GMK.on = false; GMK.cur = null; marksSync();
+  mediaOff(); if (UI.media) mediaOn(d => gmTurn(d === 'next' ? 1 : -1));
   gmWake(); gmShow(GM.i); if (!GM.preview) gmPrefetch();
   marksPull([...new Set(seq.map(x => x.song && x.song.id).filter(Boolean))]).then(ch => { if (ch && GM.open) gmMarksLoad(GM.tok); });
 }
 function closeGigMode(quiet) {
-  gmMarksFlush(); GMK.on = false; GMK.cur = null;
+  mediaOff(); gmMarksFlush(); GMK.on = false; GMK.cur = null;
   const d = $('#gigMode'); if (d) d.remove();
   document.removeEventListener('keydown', gmKey, true); document.removeEventListener('visibilitychange', gmVis);
   if (GM.lock) { try { GM.lock.release(); } catch {} GM.lock = null; }
@@ -1833,11 +1837,46 @@ function gmKey(e) {
 }
 /* Pedal setup (Band tab → My preferences): shows exactly what the pedal sends and lets you teach "next" / "previous" */
 let pedLearn = null;
-document.addEventListener('keydown', e => {
-  const box = $('#pedStatus'); if (!box || GM.open) return; const s = pedSig(e);
-  if (pedLearn) { e.preventDefault(); UI.ped = UI.ped || { next: [], prev: [] }; UI.ped[pedLearn] = [s]; keepUI(); box.innerHTML = `Saved: <b>${pedLearn === 'next' ? 'Next' : 'Previous'}</b> = ${esc(s.k)} <span class="faint">(code ${esc(s.c || '—')}, keyCode ${s.kc || '—'})</span>`; pedLearn = null; $$('[data-act="ped-learn"]').forEach(b => b.classList.remove('on')); }
-  else box.innerHTML = `Last key received: <b>${esc(s.k)}</b> <span class="faint">(code ${esc(s.c || '—')}, keyCode ${s.kc || '—'})</span>`;
-}, true);
+function pedLog(line) {
+  const box = $('#pedLog'); if (!box) return; const t = new Date().toLocaleTimeString('en-US', { hour12: false });
+  S._pedLines = [`${t}  ${line}`, ...(S._pedLines || [])].slice(0, 8); box.textContent = S._pedLines.join('\n');
+}
+['keydown', 'keyup', 'keypress', 'wheel', 'mousedown', 'pointerdown', 'touchstart', 'contextmenu'].forEach(type => document.addEventListener(type, e => {
+  if (!$('#pedLog') || GM.open) return;
+  if (['mousedown', 'pointerdown', 'touchstart', 'contextmenu'].includes(type) && e.target.closest && e.target.closest('button,select,a,input,textarea,label')) return;   // ignore your own taps on the buttons
+  if (type === 'keydown') {
+    const s = pedSig(e), box = $('#pedStatus');
+    if (pedLearn) { e.preventDefault(); UI.ped = UI.ped || { next: [], prev: [] }; UI.ped[pedLearn] = [s]; keepUI(); if (box) box.innerHTML = `Saved: <b>${pedLearn === 'next' ? 'Next' : 'Previous'}</b> = ${esc(s.k)} <span class="faint">(code ${esc(s.c || '—')}, keyCode ${s.kc || '—'})</span>`; pedLog(`learned ${pedLearn}: ${s.k}`); pedLearn = null; $$('[data-act="ped-learn"]').forEach(b => b.classList.remove('on')); return; }
+    pedLog(`key down   key=${s.k}  code=${s.c || '—'}  keyCode=${s.kc || '—'}`);
+  }
+  else if (type === 'keyup') pedLog(`key up     key=${e.key}`);
+  else if (type === 'keypress') pedLog(`keypress   ${e.key}`);
+  else if (type === 'wheel') pedLog(`scroll     dy=${Math.round(e.deltaY)} dx=${Math.round(e.deltaX)}`);
+  else { const p = e.touches && e.touches[0] ? e.touches[0] : e; pedLog(`${type}  ${e.pointerType || (e.touches ? 'touch' : 'mouse')}  at ${Math.round(p.clientX || 0)},${Math.round(p.clientY || 0)}`); }
+}, { capture: true, passive: type === 'wheel' || type === 'touchstart' }));
+
+/* Some pedals send "music controls" (next / previous track) instead of keys. A web page only hears those while it is playing audio,
+   so in that mode we play a silent loop and listen for the media buttons. */
+const MEDIA = { audio: null, on: false };
+function silentWavUrl() {
+  const n = 8000, b = new Uint8Array(44 + n), dv = new DataView(b.buffer), tag = (o, s) => { for (let i = 0; i < s.length; i++) b[o + i] = s.charCodeAt(i); };
+  tag(0, 'RIFF'); dv.setUint32(4, 36 + n, true); tag(8, 'WAVE'); tag(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, 8000, true); dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); tag(36, 'data'); dv.setUint32(40, n, true); b.fill(128, 44);
+  return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+}
+function mediaOn(onAction) {                                       // onAction('next' | 'prev', rawActionName)
+  if (!navigator.mediaSession) return false;
+  if (!MEDIA.audio) { const a = new Audio(); a.loop = true; a.src = silentWavUrl(); a.setAttribute('playsinline', ''); MEDIA.audio = a; }
+  const keepPlaying = () => { try { const p = MEDIA.audio.play(); if (p && p.catch) p.catch(() => {}); } catch {} };
+  keepPlaying(); try { navigator.mediaSession.metadata = new MediaMetadata({ title: 'Gig mode', artist: 'Trailer Folk' }); } catch {}
+  const map = { nexttrack: 'next', seekforward: 'next', play: 'next', pause: 'next', previoustrack: 'prev', seekbackward: 'prev' };
+  Object.keys(map).forEach(act => { try { navigator.mediaSession.setActionHandler(act, () => { keepPlaying(); onAction(map[act], act); }); } catch {} });
+  MEDIA.on = true; return true;
+}
+function mediaOff() {
+  if (!MEDIA.on) return; MEDIA.on = false;
+  ['nexttrack', 'seekforward', 'play', 'pause', 'previoustrack', 'seekbackward'].forEach(act => { try { navigator.mediaSession.setActionHandler(act, null); } catch {} });
+  try { MEDIA.audio.pause(); } catch {}
+}
 function gmClick(e) {
   const el = e.target.closest('[data-gm]'); if (!el) return; const a = el.dataset.gm;
   if (a === 'exit') closeGigMode();
@@ -1961,6 +2000,8 @@ document.addEventListener('change', async e => {
   } else if (t.matches('[data-imp]')) {
     S._imp.rows[Number(t.dataset.imp)].songId = t.value; const n = S._imp.rows.filter(r => r.songId).length, b = $('[data-act="chart-import-go"]');
     if (b) { b.textContent = `Upload ${n} chart${n === 1 ? '' : 's'}`; b.disabled = !n; }
+  } else if (t.matches('[data-media-mode]')) {
+    UI.media = t.checked; keepUI(); toast(t.checked ? 'Gig mode will listen for music-control buttons' : 'Music-control mode off');
   } else if (t.matches('[data-ftr]')) {
     UI.fpx = Number(t.value); keepUI(); render();
   } else if (t.matches('[data-hdr]')) {
@@ -2061,6 +2102,7 @@ const ACTIONS = {
     closeModal(); render(); toast(bad.length ? `${ok} saved, ${bad.length} failed — ${bad[0]}` : `${ok} chart${ok === 1 ? '' : 's'} saved`, !!bad.length);
   },
   'ped-learn': ({ v, el }) => { pedLearn = v; $$('[data-act="ped-learn"]').forEach(b => b.classList.toggle('on', b === el)); const box = $('#pedStatus'); if (box) box.textContent = `Now press the pedal switch you want for “${v === 'next' ? 'next' : 'previous'}”…`; },
+  'ped-media-test': () => { if (MEDIA.on) { mediaOff(); pedLog('music-control test stopped'); return toast('Music-control test stopped'); } if (!mediaOn((d, raw) => pedLog(`music button  ${raw}  →  ${d}`))) return toast('This browser can’t receive music-control buttons.', true); pedLog('listening for music-control buttons — press the pedal'); toast('Listening — press the pedal (tap Test again to stop)'); },
   'ped-reset': () => { UI.ped = null; pedLearn = null; keepUI(); const box = $('#pedStatus'); if (box) box.textContent = 'Back to the standard keys (arrows, Page Up/Down, Space).'; },
   'gig-edit': ({ g }) => { if (!g) return; S.editGig = g.id; render(); },
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
