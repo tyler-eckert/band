@@ -53,7 +53,7 @@ const api = window.__BAND_MOCK__ || {
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
-const APP_V = 44;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 45;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -266,7 +266,7 @@ const ICON = {
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3l8 3v6c0 4.4-3.1 7.9-8 9-4.9-1.1-8-4.6-8-9V6z"/><path d="M9 12l2.2 2.2L15.5 10"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
 };
-const NAV = [['home','Home','home'],['gigs','Gigs','gigs'],['setlists','Setlists','set'],['songs','Songs','songs'],['money','Metrics','money'],['prefs','Prefs','sliders'],['admin','Admin','shield']];
+const NAV = [['home','Home','home'],['gigs','Gigs','gigs'],['setlists','Sets','set'],['songs','Songs','songs'],['money','Metrics','money'],['prefs','Prefs','sliders'],['admin','Admin','shield']];
 
 function shell(route, inner) {
   const sec = route.split('/')[0];
