@@ -53,7 +53,7 @@ const api = window.__BAND_MOCK__ || {
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
-const APP_V = 42;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 43;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -127,6 +127,7 @@ async function saveMany(table, rows) {
 async function del(table, id) {
   await api.remove(table, { id });
   S[table] = S[table].filter(r => r.id !== id); snapSaveSoon();
+  return true;
 }
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
 
@@ -261,9 +262,11 @@ const ICON = {
   set: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
   songs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/></svg>',
   money: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 6.5c0-1.9-2.2-3-5-3s-5 1.3-5 3.3 2 2.8 5 3.4 5 1.4 5 3.5-2.2 3.3-5 3.3-5-1.1-5-3"/></svg>',
+  sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h11M21 18h-1"/><circle cx="16" cy="6" r="2.2"/><circle cx="10" cy="12" r="2.2"/><circle cx="18" cy="18" r="2.2"/></svg>',
+  shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3l8 3v6c0 4.4-3.1 7.9-8 9-4.9-1.1-8-4.6-8-9V6z"/><path d="M9 12l2.2 2.2L15.5 10"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
 };
-const NAV = [['home','Home','home'],['gigs','Gigs','gigs'],['setlists','Setlists','set'],['songs','Songs','songs'],['money','Metrics','money'],['settings','Band','gear']];
+const NAV = [['home','Home','home'],['gigs','Gigs','gigs'],['setlists','Setlists','set'],['songs','Songs','songs'],['money','Metrics','money'],['prefs','Prefs','sliders'],['admin','Admin','shield']];
 
 function shell(route, inner) {
   const sec = route.split('/')[0];
@@ -274,12 +277,13 @@ function shell(route, inner) {
     <a class="brand" href="#home"><img src="assets/logo.png" alt="Trailer Folk"><span class="hide-sm">HQ</span></a>
     <div class="row" style="gap:0;align-items:stretch">
       <nav class="nav">${NAV.map(([k, l]) => `<a href="#${k}" class="${on(k)}">${l}</a>`).join('')}</nav>
-      <a class="who" href="#settings" style="text-decoration:none" title="Band & settings">${me ? `<img src="${photo(me)}" alt=""><span class="nm small muted">${esc(me.name)}</span>` : ''}</a>
+      <button type="button" class="who" data-act="who-menu" title="Account">${me ? `<img src="${photo(me)}" alt=""><span class="nm small muted">${esc(me.name)}</span>` : ''}</button>
     </div>
+    <div class="who-menu" id="whoMenu" hidden><button class="btn" data-act="signout">Sign out</button></div>
   </header>
   ${S.offline ? '<div class="offline-bar"><span>Offline — showing the data saved on this device. View only.</span><button class="btn sm" data-act="go-online">Retry</button></div>' : ''}
   <div class="scroll"><main class="view">${inner}</main></div>
-  <nav class="tabbar">${NAV.filter(n => n[0] !== 'settings').map(([k, l, i]) => `<a href="#${k}" class="${on(k)}">${ICON[i]}${l}</a>`).join('')}</nav>`;
+  <nav class="tabbar">${NAV.map(([k, l, i]) => `<a href="#${k}" class="${on(k)}">${ICON[i]}${l}</a>`).join('')}</nav>`;
 }
 const title = (t, sub) => `<h1 class="echo disp"><span class="solid">${esc(t)}</span></h1>${sub ? `<p class="muted" style="margin:-10px 0 22px">${sub}</p>` : ''}`;
 
@@ -300,9 +304,10 @@ function render() {
   if (!S.loaded) return app.innerHTML = shell('home', '<p class="muted">Loading the band book…</p>');
   if (!S.me) return app.innerHTML = notMemberView();
   let route = (location.hash || '#home').slice(1);
-  if (route === 'calendar') { route = 'home'; history.replaceState(null, '', '#home'); }              // the calendar now lives at the bottom of Home
+  if (route === 'calendar') { route = 'home'; history.replaceState(null, '', '#home'); }
+  if (route === 'settings') { route = 'prefs'; history.replaceState(null, '', '#prefs'); }                // the old Band page was split into Prefs and Admin              // the calendar now lives at the bottom of Home
   const [sec, id] = route.split('/');
-  const views = { home: homeView, gigs: gigsView, gig: () => gigView(id), setlists: setlistsView, setlist: () => setlistView(id), songs: songsView, money: moneyView, settings: settingsView };
+  const views = { home: homeView, gigs: gigsView, gig: () => gigView(id), setlists: setlistsView, setlist: () => setlistView(id), songs: songsView, money: moneyView, prefs: prefsView, admin: adminView };
   const sc0 = $('.scroll'), y = sc0 ? sc0.scrollTop : 0, same = S._route === route;
   // opening Gigs from anywhere (except coming back from a gig you just looked at) always starts on Upcoming
   if (sec === 'gigs' && !same && !String(S._route || '').startsWith('gig/')) { UI.gigFilter = 'upcoming'; UI.gigYear = 'all'; UI.gigSearch = ''; keepUI(); }
@@ -1340,10 +1345,9 @@ function merchItemModal(i) {
 }
 
 /* ============================================================ settings / band */
-function settingsView() {
+function prefsView() {
   const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
-  const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}"></label>`;
-  return `${title('The Band')}
+  return `${title('Prefs')}
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
     <div class="small faint" style="margin-top:14px">App version ${APP_V} · <a href="#" data-act="app-refresh">Update app files now</a></div>
@@ -1354,6 +1358,20 @@ function settingsView() {
       return `<label class="f" style="margin-top:14px">When I don’t have my own chart for a song, use…<select class="in" data-chart-default><option value="">Nobody’s (leave it blank)</option>${[...ids].map(id => `<option value="${id}" ${cur && cur.use_member_id === id ? 'selected' : ''}>${esc((byId('members', id) || {}).name || 'Bandmate')}’s chart</option>`).join('')}</select></label><div class="small muted" style="margin-top:4px">You have ${mine} chart${mine === 1 ? '' : 's'} of your own. You can still pick a different chart song by song from the song’s page.</div>`; })()}
   </section>
   <section class="team" style="margin-bottom:18px">${ms.filter(m => m.active).map(m => `<div class="mate"><img src="${photo(m)}" alt="${esc(m.name)}"><div class="plate"><small>${esc(m.instrument || '')}</small>${esc(m.name)}</div></div>`).join('')}</section>
+  <section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Page-turner pedal</h2>
+    <div class="f" style="max-width:560px">
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn sm" data-act="ped-learn" data-v="next">Teach “next”</button><button class="btn sm" data-act="ped-learn" data-v="prev">Teach “previous”</button><button class="btn sm ghost" data-act="ped-reset">Reset</button></div>
+      <div class="small muted" id="pedStatus" style="margin-top:8px">Press a pedal switch — everything the iPad receives shows below. If nothing appears, the iPad isn’t getting anything from it (check the pedal’s mode and pairing).${UI.ped && (UI.ped.next || []).length ? ` Learned: next = ${esc(UI.ped.next[0].k)}${(UI.ped.prev || []).length ? ', previous = ' + esc(UI.ped.prev[0].k) : ''}.` : ''}</div>
+      <input id="pedFocus" class="in" readonly inputmode="none" autocomplete="off" placeholder="① Tap here, then press the pedal" style="margin-top:8px;max-width:340px">
+      <pre id="pedLog" class="small" style="margin:6px 0 0;padding:8px 10px;background:rgba(243,238,228,.05);border-radius:8px;min-height:3.4em;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace">${esc((S._pedLines || []).join('\n'))}</pre>
+      <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
+      <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
+  </section>`;
+}
+function adminView() {
+  const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
+  const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}"></label>`;
+  return `${title('Admin')}
   <div class="grid g2">
     ${mgr ? `<section class="panel"><h2 class="sec">Roster & logins</h2>
       <p class="small muted" style="margin-top:0">Each person signs in with the email listed here. Create their login in Supabase → Authentication → Users (same email).</p>
@@ -1365,6 +1383,9 @@ function settingsView() {
       </tbody></table>
       <div class="row" style="margin-top:12px"><button class="btn gold sm" data-act="save-members">Save roster</button></div>
     </section>` : ''}
+    <section class="panel"><div class="row"><h2 class="sec" style="margin:0">Clients</h2><span class="spacer"></span><button class="btn sm gold" data-act="client-new">+ New client</button></div>
+      <div class="list" style="margin-top:8px">${S.clients.slice().sort((a, b) => (a.org || a.contact_name || '').localeCompare(b.org || b.contact_name || '')).map(c => { const n = S.gigs.filter(g => g.client_id === c.id).length; return `<div class="li" data-act="client-edit" data-id="${c.id}" style="cursor:pointer"><div class="grow"><div class="t">${esc(c.org || c.contact_name)}</div><div class="s">${esc([c.contact_name, c.email, c.phone].filter(Boolean).join(' · '))}</div></div><span class="small muted">${esc(c.code || '')} · ${n} gig${n === 1 ? '' : 's'}</span></div>`; }).join('') || '<div class="empty">No clients yet — add one here, or from a gig.</div>'}</div>
+    </section>
     <section class="panel"><h2 class="sec">Quotes & invoices</h2>
       <div class="fgrid">
         ${f('band_email', 'Band email', 'w2')}${f('default_terms', 'Terms')}${f('quote_valid_days', 'Quote good for (days)', '', 'number')}
@@ -1390,20 +1411,7 @@ function settingsView() {
         <label class="f w4">Check note<input class="in" data-p="${p.id}" data-k="check_note" value="${esc(p.check_note || '')}"></label></div>`).join('')}
       <div class="row"><button class="btn gold sm" data-act="save-payees">Save pay-to</button><button class="btn sm" data-act="payee-new">+ Pay-to</button></div>
     </section>
-    <section class="panel"><h2 class="sec">Clients</h2>
-      <div class="list">${S.clients.slice().sort((a, b) => (a.org || a.contact_name || '').localeCompare(b.org || b.contact_name || '')).map(c => { const n = S.gigs.filter(g => g.client_id === c.id).length; return `<div class="li"><div class="grow"><div class="t">${esc(c.org || c.contact_name)}</div><div class="s">${esc([c.contact_name, c.email, c.phone].filter(Boolean).join(' · '))}</div></div><span class="small muted">${esc(c.code || '')} · ${n} gig${n === 1 ? '' : 's'}</span></div>`; }).join('') || '<div class="empty">Clients get saved from the gig page.</div>'}</div>
-    </section>
-  </div>
-  <div class="row" style="margin-top:18px"><span class="small muted">Signed in as ${esc(S.session.user.email)}</span><span class="spacer"></span><button class="btn" data-act="signout">Sign out</button></div>
-  <section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Page-turner pedal</h2>
-    <div class="f" style="max-width:560px">
-      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn sm" data-act="ped-learn" data-v="next">Teach “next”</button><button class="btn sm" data-act="ped-learn" data-v="prev">Teach “previous”</button><button class="btn sm ghost" data-act="ped-reset">Reset</button></div>
-      <div class="small muted" id="pedStatus" style="margin-top:8px">Press a pedal switch — everything the iPad receives shows below. If nothing appears, the iPad isn’t getting anything from it (check the pedal’s mode and pairing).${UI.ped && (UI.ped.next || []).length ? ` Learned: next = ${esc(UI.ped.next[0].k)}${(UI.ped.prev || []).length ? ', previous = ' + esc(UI.ped.prev[0].k) : ''}.` : ''}</div>
-      <input id="pedFocus" class="in" readonly inputmode="none" autocomplete="off" placeholder="① Tap here, then press the pedal" style="margin-top:8px;max-width:340px">
-      <pre id="pedLog" class="small" style="margin:6px 0 0;padding:8px 10px;background:rgba(243,238,228,.05);border-radius:8px;min-height:3.4em;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace">${esc((S._pedLines || []).join('\n'))}</pre>
-      <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
-      <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
-  </section>`;
+  </div>`;
 }
 
 /* ============================================================ PDFs */
@@ -1992,6 +2000,19 @@ async function gmPrefetch() {                                       // save ever
   }
 }
 
+function clientModal(c) {
+  const k = c || {}, linked = c ? S.gigs.filter(g => g.client_id === c.id).sort((a, b) => (b.gig_date || '').localeCompare(a.gig_date || '')) : [];
+  const fld = (key, label, cls = '', type = 'text', ph = '') => `<label class="f ${cls}">${label}<input class="in" data-cl="${key}" type="${type}" value="${esc(k[key] || '')}" placeholder="${ph}"></label>`;
+  const pick = S.gigs.filter(g => g.kind === 'gig' && (!c || g.client_id !== c.id)).sort((a, b) => (!!a.client_id - !!b.client_id) || (b.gig_date || '').localeCompare(a.gig_date || ''));
+  return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(720px,100%)">
+    <div class="row"><h2 class="sec" style="margin:0">${c ? 'Client' : 'New client'}</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div>
+    <div class="fgrid" style="margin-top:12px">${fld('org', 'Organization', 'w2')}${fld('contact_name', 'Contact', 'w2')}${fld('email', 'Email', 'w2', 'email')}${fld('phone', 'Phone', 'w2')}${fld('address1', 'Street', 'w2')}${fld('city_state_zip', 'City, ST ZIP', 'w2')}${fld('code', 'Invoice code', '', 'text', 'OUHSC')}</div>
+    <h2 class="sec" style="margin-top:18px">Gigs</h2>
+    ${linked.length ? `<div class="list">${linked.map(g => `<div class="li"><div class="grow"><a href="#gig/${g.id}" data-act="modal-close" class="t" style="text-decoration:none">${esc(g.title)}</a><div class="s">${esc(g.gig_date ? fmtDate(g.gig_date) : 'No date')}</div></div><button class="btn sm" data-act="client-unlink" data-gid="${g.id}" data-cid="${c.id}">Remove</button></div>`).join('')}</div>` : '<p class="small muted" style="margin:0">Not tied to any gig yet.</p>'}
+    <label class="f" style="margin-top:12px">Tie to a gig<select class="in" data-cl-gig><option value="">— Pick a gig (optional) —</option>${pick.map(g => `<option value="${g.id}">${esc(g.gig_date ? mdY(g.gig_date) + ' · ' : '')}${esc(g.title)}${g.client_id ? ' — now: ' + esc(((byId('clients', g.client_id) || {}).org) || 'another client') : ' — no client'}</option>`).join('')}</select></label>
+    <div class="row" style="margin-top:16px"><button class="btn gold" data-act="client-save" data-id="${c ? c.id : ''}">Save${c ? '' : ' client'}</button><button class="btn" data-act="modal-close">Close</button><span class="spacer"></span>${c ? `<button class="btn danger" data-act="client-delete" data-id="${c.id}">Delete</button>` : ''}</div>
+  </div></div>`;
+}
 function openModal(html) { closeModal(); const d = document.createElement('div'); d.id = 'modalRoot'; d.innerHTML = html; document.body.appendChild(d); const f = d.querySelector('input,select'); if (f) f.focus(); }
 function closeModal() { const m = $('#modalRoot'); if (m) m.remove(); }
 
@@ -2061,6 +2082,7 @@ document.addEventListener('submit', async e => {
 
 document.addEventListener('click', async e => {
   const hrefRow = e.target.closest('tr[data-href]'); if (hrefRow && !e.target.closest('a,button')) { location.hash = hrefRow.dataset.href; return; }
+  { const wm = $('#whoMenu'); if (wm && !wm.hidden && !e.target.closest('#whoMenu,[data-act="who-menu"]')) wm.hidden = true; }      // click anywhere else closes the account menu
   const el = e.target.closest('[data-act]'); if (!el) return;
   const fc = e.target.closest('input,textarea,select'); if (fc && fc !== el) return;                       // typing in a field never fires the card around it
   if (el.closest('[data-stop]') && el.dataset.act === 'modal-close' && el.classList.contains('scrim')) return;
@@ -2143,6 +2165,25 @@ const ACTIONS = {
   'ped-reset': () => { UI.ped = null; pedLearn = null; keepUI(); const box = $('#pedStatus'); if (box) box.textContent = 'Back to the standard keys (arrows, Page Up/Down, Space).'; },
   'gig-edit': ({ g }) => { if (!g) return; S.editGig = g.id; render(); },
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
+  'client-new': () => openModal(clientModal(null)),
+  'client-edit': ({ id }) => openModal(clientModal(byId('clients', id))),
+  'client-save': async ({ id }) => {
+    const vals = {}; $$('[data-cl]').forEach(i => vals[i.dataset.cl] = i.value.trim() || null);
+    if (!vals.org && !vals.contact_name) return toast('Add an organization or a contact name.', true);
+    const base = id ? byId('clients', id) : null;
+    const c = await guard(() => save('clients', { ...(base || { id: uuid() }), ...vals }), 'Client saved'); if (!c) return;
+    const gid = ($('[data-cl-gig]') || {}).value, g = gid && byId('gigs', gid);
+    if (g) await guard(() => save('gigs', { ...g, client_id: c.id }), `Tied to ${g.title}`);
+    openModal(clientModal(c)); render();
+  },
+  'client-unlink': async ({ el }) => { const g = byId('gigs', el.dataset.gid); if (!g) return; if (await guard(() => save('gigs', { ...g, client_id: null }), 'Removed from the gig')) { openModal(clientModal(byId('clients', el.dataset.cid))); render(); } },
+  'client-delete': async ({ id }) => {
+    const c = byId('clients', id); if (!c) return;
+    if (S.gigs.some(g => g.client_id === id)) return toast('Remove this client from its gigs first.', true);
+    if (!confirm(`Delete ${c.org || c.contact_name}?`)) return;
+    if (await guard(() => del('clients', id), 'Client deleted')) { closeModal(); render(); }
+  },
+  'who-menu': () => { const m = $('#whoMenu'); if (m) m.hidden = !m.hidden; },
   'gig-na': async ({ el, g }) => {
     if (!g) return; const k = el.dataset.k, cur = new Set(Array.isArray(g.checklist_na) ? g.checklist_na : []); cur.has(k) ? cur.delete(k) : cur.add(k);
     if (!(await guard(() => save('gigs', { ...g, checklist_na: [...cur] })))) return;

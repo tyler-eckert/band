@@ -74,7 +74,9 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .nav a{display:flex;align-items:center;padding:0 16px;color:var(--cream);text-decoration:none;font-size:14px;opacity:.82;border-bottom:2px solid transparent}
 .nav a:hover{opacity:1}
 .nav a.on{color:var(--gold);opacity:1;font-weight:700;border-bottom-color:var(--gold)}
-.who{display:flex;align-items:center;gap:8px;padding-left:12px}
+.who{display:flex;align-items:center;gap:8px;padding-left:12px;background:none;border:0;color:inherit;font:inherit;cursor:pointer}
+.who-menu{position:absolute;right:max(16px,env(safe-area-inset-right));top:100%;z-index:60;padding:8px;background:#14100a;border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.55)}
+.who-menu[hidden]{display:none}
 .who img{width:30px;height:30px;border-radius:50%;object-fit:cover;filter:grayscale(1);border:1px solid var(--line)}
 /* the tab bar is the only navigation, at every screen size, in Safari and in the Home Screen app */
 .nav{display:none}
@@ -389,6 +391,6 @@ main{padding-bottom:72px}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=42"></script>
+<script src="app.js?v=43"></script>
 </body>
 </html>
