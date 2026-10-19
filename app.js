@@ -53,6 +53,7 @@ const api = window.__BAND_MOCK__ || {
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
+const APP_V = 39;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1344,9 +1345,11 @@ function settingsView() {
   return `${title('The Band')}
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
+    <div class="small faint" style="margin-top:14px">App version ${APP_V} · <a href="#" data-act="app-refresh">Update app files now</a></div>
     <div class="f" style="margin-top:14px;max-width:460px"><span>Page-turner pedal</span>
       <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn sm" data-act="ped-learn" data-v="next">Teach “next”</button><button class="btn sm" data-act="ped-learn" data-v="prev">Teach “previous”</button><button class="btn sm ghost" data-act="ped-reset">Reset</button></div>
       <div class="small muted" id="pedStatus" style="margin-top:8px">Press a pedal switch — everything the iPad receives shows below. If nothing appears, the iPad isn’t getting anything from it (check the pedal’s mode and pairing).${UI.ped && (UI.ped.next || []).length ? ` Learned: next = ${esc(UI.ped.next[0].k)}${(UI.ped.prev || []).length ? ', previous = ' + esc(UI.ped.prev[0].k) : ''}.` : ''}</div>
+      <input id="pedFocus" class="in" readonly inputmode="none" autocomplete="off" placeholder="① Tap here, then press the pedal" style="margin-top:8px;max-width:340px">
       <pre id="pedLog" class="small" style="margin:6px 0 0;padding:8px 10px;background:rgba(243,238,228,.05);border-radius:8px;min-height:3.4em;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace">${esc((S._pedLines || []).join('\n'))}</pre>
       <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
@@ -1794,10 +1797,14 @@ function openGigMode(seq, lid, opts = {}) {
     <div class="gm-title"><div class="gm-t1" id="gmT1"></div><div class="gm-t2"><span id="gmT2"></span> <span id="gmPre"></span></div></div>
     <button class="gm-awake" data-gm="awake" id="gmAwake"></button>
     <button class="gm-btn" data-gm="pen" id="gmPenBtn" aria-label="Pencil markup">Pen</button><button class="gm-btn" data-gm="zoom-out" aria-label="Smaller">A−</button><button class="gm-btn" data-gm="zoom-in" aria-label="Bigger">A+</button>${GM.preview ? '' : '<button class="gm-btn" data-gm="list" aria-label="Song list">☰</button>'}</div>
+    <input id="gmKeys" class="gm-keys" readonly inputmode="none" autocomplete="off" autocapitalize="off" aria-hidden="true" tabindex="-1">
     <div class="gm-tools" id="gmTools" hidden></div><div class="gm-view" id="gmView"></div><div class="gm-bottom" id="gmBottom"></div><div class="gm-drawer" id="gmDrawer" hidden></div>`;
   document.body.appendChild(d);
   d.addEventListener('click', gmClick); document.addEventListener('keydown', gmKey, true); document.addEventListener('visibilitychange', gmVis);
-  d.addEventListener('selectstart', e => e.preventDefault()); d.setAttribute('tabindex', '-1'); try { d.focus({ preventScroll: true }); } catch {}
+  d.addEventListener('selectstart', e => e.preventDefault()); d.setAttribute('tabindex', '-1');
+  const focusKeys = () => { const k = $('#gmKeys'); if (GM.open && k && document.activeElement !== k) { try { k.focus({ preventScroll: true }); } catch {} } };
+  d.addEventListener('pointerup', () => setTimeout(focusKeys, 30)); d.addEventListener('click', () => setTimeout(focusKeys, 30)); d.addEventListener('focusout', () => setTimeout(focusKeys, 120));
+  focusKeys();
   const gv = d.querySelector('#gmView'); ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach(t => gv.addEventListener(t, gmPtr)); gv.addEventListener('contextmenu', e => { if (GMK.on) e.preventDefault(); });
   GMK.on = false; GMK.cur = null; marksSync();
   mediaOff(); if (UI.media) mediaOn(d => gmTurn(d === 'next' ? 1 : -1));
@@ -1841,6 +1848,9 @@ function pedLog(line) {
   const box = $('#pedLog'); if (!box) return; const t = new Date().toLocaleTimeString('en-US', { hour12: false });
   S._pedLines = [`${t}  ${line}`, ...(S._pedLines || [])].slice(0, 8); box.textContent = S._pedLines.join('\n');
 }
+document.addEventListener('focusin', e => { if (e.target && e.target.id === 'pedFocus') pedLog('box focused — now press the pedal'); }, true);
+document.addEventListener('focusout', e => { if (e.target && e.target.id === 'pedFocus') pedLog('box lost focus'); }, true);
+document.addEventListener('scroll', e => { if (!$('#pedLog') || GM.open) return; const t = e.target === document ? 'page' : (e.target.id || e.target.className || e.target.tagName); pedLog(`something scrolled (${String(t).slice(0, 18)})`); }, true);
 ['keydown', 'keyup', 'keypress', 'wheel', 'mousedown', 'pointerdown', 'touchstart', 'contextmenu'].forEach(type => document.addEventListener(type, e => {
   if (!$('#pedLog') || GM.open) return;
   if (['mousedown', 'pointerdown', 'touchstart', 'contextmenu'].includes(type) && e.target.closest && e.target.closest('button,select,a,input,textarea,label')) return;   // ignore your own taps on the buttons
@@ -2103,6 +2113,7 @@ const ACTIONS = {
   },
   'ped-learn': ({ v, el }) => { pedLearn = v; $$('[data-act="ped-learn"]').forEach(b => b.classList.toggle('on', b === el)); const box = $('#pedStatus'); if (box) box.textContent = `Now press the pedal switch you want for “${v === 'next' ? 'next' : 'previous'}”…`; },
   'ped-media-test': () => { if (MEDIA.on) { mediaOff(); pedLog('music-control test stopped'); return toast('Music-control test stopped'); } if (!mediaOn((d, raw) => pedLog(`music button  ${raw}  →  ${d}`))) return toast('This browser can’t receive music-control buttons.', true); pedLog('listening for music-control buttons — press the pedal'); toast('Listening — press the pedal (tap Test again to stop)'); },
+  'app-refresh': async () => { try { if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); if (window.caches) for (const k of await caches.keys()) await caches.delete(k); } catch {} toast('Updating…'); setTimeout(() => location.reload(), 400); },
   'ped-reset': () => { UI.ped = null; pedLearn = null; keepUI(); const box = $('#pedStatus'); if (box) box.textContent = 'Back to the standard keys (arrows, Page Up/Down, Space).'; },
   'gig-edit': ({ g }) => { if (!g) return; S.editGig = g.id; render(); },
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
