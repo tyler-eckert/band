@@ -286,8 +286,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px 20px}
 .kv .v{font-size:17px;font-weight:600;margin-top:2px}
 .chk{display:flex;flex-direction:column}
-.chk .check{padding:11px 4px;border-top:1px solid var(--line-soft);font-size:14px}
-.chk .check:first-child{border-top:0}
+.chk .check{padding:11px 4px;font-size:14px}
+.chk .crow{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line-soft)}
+.chk .crow:first-child{border-top:0}
+.chk .crow .check{flex:1;min-width:0;border-top:0}
+.na-btn{flex:none;background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;font-size:12px;font-weight:700;padding:5px 10px;font-family:inherit}
+.chk .crow.na .check span{text-decoration:line-through;opacity:.5}
+.chk .crow.na .na-btn{color:var(--gold);border-color:var(--gold)}
 .chk .check input{width:20px;height:20px;flex:none}
 .cal.compact .day{min-height:64px}
 .cal-month{font-family:var(--display);font-stretch:112%;font-weight:800;color:var(--gold);font-size:17px;margin:18px 0 8px}
@@ -349,7 +354,7 @@ a.back:active{background:rgba(243,238,228,.14)}
 main.view,.modal>*{zoom:var(--tz,1)}
 /* ---------- offline (view-only) ---------- */
 .offline-bar{flex:none;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;padding:6px 12px;background:#2a1d05;color:var(--gold);font-size:13px;border-bottom:1px solid var(--line)}
-body.offline :is([data-act="gig-edit"],[data-act="sl-edit"],[data-act^="new-"],[data-act="sl-new"],[data-act="song-new"],[data-act="song-edit-mode"],[data-act="set-status"],[data-act^="exp-"],[data-act^="sale-"],[data-act^="merch-"],[data-act="opt-open"],[data-act="set-default"],[data-act="set-clear-ask"],[data-act="sl-dup"],[data-act="sl-del-ask"],[data-act="sl-unassign"],[data-act="rotate-token"],[data-act="save-settings"],[data-act="save-members"],[data-act="song-save"],[data-act="photo-del"],[data-act^="chart-del"],[data-act="chart-use"]),
+body.offline :is([data-act="gig-edit"],[data-act="sl-edit"],[data-act^="new-"],[data-act="sl-new"],[data-act="song-new"],[data-act="song-edit-mode"],[data-act="gig-na"],[data-act="set-status"],[data-act^="exp-"],[data-act^="sale-"],[data-act^="merch-"],[data-act="opt-open"],[data-act="set-default"],[data-act="set-clear-ask"],[data-act="sl-dup"],[data-act="sl-del-ask"],[data-act="sl-unassign"],[data-act="rotate-token"],[data-act="save-settings"],[data-act="save-members"],[data-act="song-save"],[data-act="photo-del"],[data-act^="chart-del"],[data-act="chart-use"]),
 body.offline label:has(:is([data-photo],[data-chart-import],[data-chart-up])){display:none!important}
 body.offline :is(.chk,.stars:not(.ro),[data-chart-default],[data-text-size]){pointer-events:none;opacity:.45}
 body.offline [data-text-size]{pointer-events:auto;opacity:1}
@@ -384,6 +389,6 @@ main{padding-bottom:72px}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=41"></script>
+<script src="app.js?v=42"></script>
 </body>
 </html>
