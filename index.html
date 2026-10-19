@@ -40,7 +40,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
 /* app shell: header and tab bar never move; only .scroll scrolls (stops iOS toolbar collapse from shifting the footer) */
-#app{position:fixed;inset:0;display:flex;flex-direction:column;overflow-y:auto}
+#app{position:fixed;inset:0;display:flex;flex-direction:column;overflow-y:auto;background-color:#0e0a01;background-image:radial-gradient(120% 80% at 85% 0%, #2c1d03 0%, var(--ink-1) 45%, var(--ink-0) 100%)}   /* an opaque, fixed, full-screen container: iPadOS 26+ skips its glass blur over this */
 .scroll{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
 body{
   background:radial-gradient(120% 80% at 85% 0%, #2c1d03 0%, var(--ink-1) 45%, var(--ink-0) 100%) fixed var(--ink-0);
@@ -63,7 +63,7 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
 
 /* ---------- top bar (press kit nav) ---------- */
-.top{position:relative;flex:none;z-index:20;display:flex;align-items:stretch;justify-content:space-between;gap:12px;
+.top{position:sticky;top:0;flex:none;z-index:20;display:flex;align-items:stretch;justify-content:space-between;gap:12px;
   padding:0 max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left));
   padding-top:calc(max(env(safe-area-inset-top, 0px), 20px) + 18px);
   background:#0e0a01;-webkit-backdrop-filter:none;backdrop-filter:none;isolation:isolate;border-bottom:1px solid var(--line-soft)}   /* solid, like the status-bar strip and the footer: nothing scrolls under it any more, so no see-through haze */
@@ -86,7 +86,7 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .tabbar a{flex:1 1 0;min-width:0;max-width:200px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:8px 0 0;color:var(--muted);text-decoration:none;font-size:10.5px;font-weight:600;line-height:1}
 .tabbar a svg{width:22px;height:22px;display:block;flex:none}
 .tabbar a.on{color:var(--gold)}
-.sa-top{position:fixed;inset:0 0 auto;height:max(env(safe-area-inset-top,0px),8px);background:#0e0a01;z-index:25}   /* solid strip at the very top: also what Safari samples to tint its own bar */
+.sa-top{position:fixed;top:0;left:0;right:0;height:max(env(safe-area-inset-top,0px),16px);background-color:#0e0a01;z-index:90}   /* solid strip at the very top: also what Safari samples to tint its own bar */
 
 main{max-width:1240px;margin:0 auto;padding:28px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
 
@@ -446,6 +446,6 @@ body.song-dragging{-webkit-user-select:none;user-select:none;cursor:grabbing}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=52"></script>
+<script src="app.js?v=53"></script>
 </body>
 </html>
