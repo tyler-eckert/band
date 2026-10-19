@@ -1,4 +1,4 @@
-Trailer Folk HQ - latest full set (rev 34, index.html loads app.js?v=41)
+Trailer Folk HQ - latest full set (rev 35, index.html loads app.js?v=42)
 
 PUSH TO GITHUB (repo root, replacing the old copies):
   index.html, app.js
@@ -14,6 +14,7 @@ RUN IN SUPABASE (SQL Editor; each is safe to re-run; skip any you've already run
   supabase/10_song_charts.sql           personal PDF charts (tables + private storage bucket)
   supabase/11_song_bpm.sql              BPM on songs
   (01-04 and 02_seed.sql are your originals; the seed has your data - don't commit it to a public repo)
+  supabase/14_checklist_na.sql          NEW - struck-through (N/A) checklist items
   supabase/13_chart_marks.sql           NEW - Apple Pencil markup (private to each member). Run after 10.
   supabase/12_catchup_columns.sql        - adds every column the app needs, then refreshes Supabase's schema cache. If you get
                                         "Could not find the '...' column", run this one.
@@ -23,8 +24,8 @@ REDEPLOY: supabase/functions/band-calendar/index.ts   (CHANGED in this release -
 NOT INCLUDED (keep your existing copies): CNAME, assets/, vendor/
 
 Checksums:
-e3829e9f8aad2fdc05382e5656dbace9  ./app.js
-5a24eb789bd0e67c92cf138d54e08835  ./index.html
+8cbcf2d822c59093dec5eed73db8e82c  ./app.js
+d07ee51da090a486be3e0ba71da712b1  ./index.html
 96de323330f8b8336f637a0051835e00  ./pdf.min.js
 a53a71a2a5d618ed0f86ebf099db032a  ./pdf.worker.min.js
 2ee41112a44fe7014dce33e26468ba93  ./pdfjs-LICENSE.txt
@@ -39,7 +40,8 @@ c78fe2515b1c4e986e0f1038d2c71fde  ./supabase/05_view_edit_checklist.sql
 6c36e77f63311370d51f9687c49ddd38  ./supabase/09_song_encore.sql
 5676b8eea6ee5a77a579355c0821d0d3  ./supabase/10_song_charts.sql
 07019cd84002c815d5d4e07aa3c5a5d9  ./supabase/11_song_bpm.sql
-275fc1d697183bcb4d93effd6c48fadb  ./supabase/12_catchup_columns.sql
+c836d3ec0a3f2f42189a6e02adf1cb00  ./supabase/12_catchup_columns.sql
 f4a85ae468eb27fa9b0a40212cb37ef6  ./supabase/13_chart_marks.sql
+e80056b654f6ac0e441727569df992fc  ./supabase/14_checklist_na.sql
 3fc1c16da2f207f03dfa18ccc8d2e084  ./supabase/functions/band-calendar/index.ts
 ab8991726a19563ae673cc90ffab489d  ./sw.js

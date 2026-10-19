@@ -53,7 +53,7 @@ const api = window.__BAND_MOCK__ || {
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
-const APP_V = 41;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 42;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -223,13 +223,13 @@ function attention() {
     const d = g.gig_date;
     if (g.status === 'confirmed' && d && d < t) add('hi', g, `Played ${fmtDate(d)}? Mark it played and log pay, tips & merch.`, 'Wrap up');
     if (g.status === 'complete') {
-      if (n0(g.quote) > 0 && !g.invoice_no && !g.invoice_sent && balanceDue(g) > 0) add('hi', g, `No invoice sent — ${money(balanceDue(g))} still due.`, 'Invoice');
+      if (n0(g.quote) > 0 && !g.invoice_no && !g.invoice_sent && !isNA(g, 'invoice_sent') && balanceDue(g) > 0) add('hi', g, `No invoice sent — ${money(balanceDue(g))} still due.`, 'Invoice');
       else if (g.invoiced_on && balanceDue(g) > 0 && days(g.invoiced_on, t) > terms) add('hi', g, `Invoice ${g.invoice_no} is ${days(g.invoiced_on, t) - terms} days past ${st.default_terms || 'NET30'} — ${money(balanceDue(g))} due.`, 'Follow up');
       else if (g.invoiced_on && balanceDue(g) > 0) add('lo', g, `Waiting on payment for ${g.invoice_no} (${money(balanceDue(g))}, due ${mdY(iso(new Date(pd(g.invoiced_on).getTime() + terms * 864e5)))}).`, 'Open');
     }
-    if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 30 && !g.paperwork_signed) add('md', g, 'Paperwork not signed yet.', 'Paperwork');
-    if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 7 && !g.details_sent) add('md', g, 'Gig-week details not sent to the client yet.', 'Details');
-    if (g.status === 'confirmed' && n0(g.deposit_amount) > 0 && !g.deposit_received) add('md', g, `Deposit of ${money(g.deposit_amount)} not received yet.`, 'Deposit');
+    if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 30 && !g.paperwork_signed && !isNA(g, 'paperwork_signed')) add('md', g, 'Paperwork not signed yet.', 'Paperwork');
+    if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 7 && !g.details_sent && !isNA(g, 'details_sent')) add('md', g, 'Gig-week details not sent to the client yet.', 'Details');
+    if (g.status === 'confirmed' && n0(g.deposit_amount) > 0 && !g.deposit_received && !isNA(g, 'deposit_received')) add('md', g, `Deposit of ${money(g.deposit_amount)} not received yet.`, 'Deposit');
     if (['confirmed'].includes(g.status) && d && d >= t && days(t, d) <= (st.remind_setlist_days || 14) && !setItems(g.id).length) add(days(t, d) <= 5 ? 'hi' : 'md', g, `Gig in ${days(t, d)} days and no setlist yet.`, 'Build set');
     if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 21 && (!g.start_time || !g.venue || /tbd/i.test(g.venue || ''))) add('md', g, 'Missing start time or venue — lock in details with the client.', 'Details');
     if (g.status === 'confirmed' && !d) add('md', g, 'Booked but no date set.', 'Details');
@@ -488,11 +488,12 @@ function photosPanel(g, editing) {
   return `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Photos</h2><span class="spacer"></span><label class="btn sm gold" style="cursor:pointer">+ Add photo<input type="file" accept="image/*" hidden data-photo="${g.id}"></label></div>
     ${ph.length ? `<div class="photos" style="margin-top:12px">${ph.map(p => `<div class="ph"><img data-ph="${esc(p.path)}" data-act="photo-open" alt="Gig photo">${editing ? `<button class="ib" data-act="photo-del" data-path="${esc(p.path)}" title="Remove photo">✕</button>` : ''}</div>`).join('')}</div>` : '<p class="small muted" style="margin:10px 0 0">Load-in map, stage plot, parking — add a photo and everyone can see it here.</p>'}</section>`;
 }
+const isNA = (g, k) => Array.isArray(g.checklist_na) && g.checklist_na.includes(k);
 const CHECKS = [['deposit_received', 'Deposit received'], ['paperwork_signed', 'Paperwork signed'], ['invoice_sent', 'Invoice sent'], ['paid_in_full', 'Paid in full'], ['details_sent', 'Gig details sent to client']];
 function checklistPanel(g) {
   const hint = { deposit_received: n0(g.deposit_amount) ? money(g.deposit_amount) + (g.deposit_received_on ? ' · ' + mdY(g.deposit_received_on) : '') : '', invoice_sent: g.invoice_no || '', paid_in_full: g.paid_in_full && g.paid_on ? mdY(g.paid_on) : '' };
-  return `<section class="panel"><h2 class="sec">Checklist</h2><div class="chk">${CHECKS.map(([k, l]) => `
-    <label class="check"><input type="checkbox" data-act="gig-chk" data-k="${k}" ${g[k] ? 'checked' : ''}><span>${l}</span><span class="small faint" style="margin-left:auto">${esc(hint[k] || '')}</span></label>`).join('')}</div></section>`;
+  return `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Checklist</h2><span class="spacer"></span><span class="small faint">N/A strikes an item that doesn’t apply</span></div><div class="chk" style="margin-top:6px">${CHECKS.map(([k, l]) => { const na = isNA(g, k); return `
+    <div class="crow ${na ? 'na' : ''}" data-row="${k}"><label class="check"><input type="checkbox" data-act="gig-chk" data-k="${k}" ${g[k] ? 'checked' : ''} ${na ? 'disabled' : ''}><span>${l}</span><span class="small faint" style="margin-left:auto">${esc(hint[k] || '')}</span></label><button type="button" class="na-btn" data-act="gig-na" data-k="${k}">${na ? 'Use' : 'N/A'}</button></div>`; }).join('')}</div></section>`;
 }
 /* read-only sets with clock times — used on the gig page and the setlist page */
 function setlistSets(L, compact) {
@@ -2012,6 +2013,7 @@ function after(sec, id) {
   hydratePhotos();
   $$('[data-act-change="sl-attach"]').forEach(el => el.onchange = e => e.target.value && assignSetlist(e.target.value, el.dataset.gig));
   if (sec === 'gig') $$('[data-f],[data-c]').forEach(el => el.addEventListener('input', () => { S.dirty = true; const n = $('#dirtyNote'); if (n) n.textContent = 'Unsaved changes'; }));
+  if (sec === 'gig') $$('[data-f="client_id"]').forEach(sel => sel.addEventListener('change', () => fillClient(sel.value)));
 }
 function rerenderKeepFocus(sel) { const el = $(sel); const pos = el ? el.selectionStart : 0; render(); const n = $(sel); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch {} } }
 
@@ -2141,6 +2143,12 @@ const ACTIONS = {
   'ped-reset': () => { UI.ped = null; pedLearn = null; keepUI(); const box = $('#pedStatus'); if (box) box.textContent = 'Back to the standard keys (arrows, Page Up/Down, Space).'; },
   'gig-edit': ({ g }) => { if (!g) return; S.editGig = g.id; render(); },
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
+  'gig-na': async ({ el, g }) => {
+    if (!g) return; const k = el.dataset.k, cur = new Set(Array.isArray(g.checklist_na) ? g.checklist_na : []); cur.has(k) ? cur.delete(k) : cur.add(k);
+    if (!(await guard(() => save('gigs', { ...g, checklist_na: [...cur] })))) return;
+    const row = $(`[data-row="${k}"]`), na = cur.has(k);                    // update the row in place so nothing you're typing in edit mode is lost
+    if (row) { row.classList.toggle('na', na); const cb = row.querySelector('input'); if (cb) cb.disabled = na; el.textContent = na ? 'Use' : 'N/A'; }
+  },
   'gig-chk': async ({ el, g }) => {
     if (!g) return; const k = el.dataset.k, on = el.checked, r = { ...g, [k]: on };
     if (k === 'deposit_received') r.deposit_received_on = on ? (g.deposit_received_on || todayIso()) : null;
@@ -2279,6 +2287,13 @@ function collectGig(g) {
   if (r.deposit_received && !g.deposit_received && !r.deposit_received_on) r.deposit_received_on = todayIso();
   if (r.paid != null && g.paid == null && !r.paid_on) r.paid_on = todayIso();
   return r;
+}
+function fillClient(id) {                                          // choosing a saved client copies its details into the form (None / New clears them)
+  const c = id ? byId('clients', id) : null;
+  $$('[data-c]').forEach(i => { i.value = c ? (c[i.dataset.c] || '') : ''; });
+  const sum = $('[data-fold="client"] .sum'); if (sum) sum.textContent = c ? ([c.contact_name, c.org].filter(Boolean).join(' — ') || 'Saved client') : 'No client yet';
+  S.dirty = true; const n = $('#dirtyNote'); if (n) n.textContent = 'Unsaved changes';
+  if (c) toast('Client details filled in');
 }
 async function saveGigForm(g, quiet) {
   const r = collectGig(g);
