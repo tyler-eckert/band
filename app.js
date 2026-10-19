@@ -53,7 +53,7 @@ const api = window.__BAND_MOCK__ || {
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
-const APP_V = 43;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 44;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1373,16 +1373,6 @@ function adminView() {
   const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}"></label>`;
   return `${title('Admin')}
   <div class="grid g2">
-    ${mgr ? `<section class="panel"><h2 class="sec">Roster & logins</h2>
-      <p class="small muted" style="margin-top:0">Each person signs in with the email listed here. Create their login in Supabase → Authentication → Users (same email).</p>
-      <table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Linked</th></tr></thead><tbody>
-      ${ms.map(m => `<tr><td><b>${esc(m.name)}</b><div class="small muted">${esc(m.instrument || '')}</div></td>
-        <td><input class="in" data-m="${m.id}" data-k="email" value="${esc(m.email || '')}" placeholder="email"></td>
-        <td><select class="in" style="min-width:112px" data-m="${m.id}" data-k="role"><option ${m.role === 'member' ? 'selected' : ''}>member</option><option ${m.role === 'manager' ? 'selected' : ''}>manager</option></select></td>
-        <td class="small">${m.user_id ? '<span style="color:var(--ok)">Yes</span>' : '<span class="faint">Not yet</span>'}</td></tr>`).join('')}
-      </tbody></table>
-      <div class="row" style="margin-top:12px"><button class="btn gold sm" data-act="save-members">Save roster</button></div>
-    </section>` : ''}
     <section class="panel"><div class="row"><h2 class="sec" style="margin:0">Clients</h2><span class="spacer"></span><button class="btn sm gold" data-act="client-new">+ New client</button></div>
       <div class="list" style="margin-top:8px">${S.clients.slice().sort((a, b) => (a.org || a.contact_name || '').localeCompare(b.org || b.contact_name || '')).map(c => { const n = S.gigs.filter(g => g.client_id === c.id).length; return `<div class="li" data-act="client-edit" data-id="${c.id}" style="cursor:pointer"><div class="grow"><div class="t">${esc(c.org || c.contact_name)}</div><div class="s">${esc([c.contact_name, c.email, c.phone].filter(Boolean).join(' · '))}</div></div><span class="small muted">${esc(c.code || '')} · ${n} gig${n === 1 ? '' : 's'}</span></div>`; }).join('') || '<div class="empty">No clients yet — add one here, or from a gig.</div>'}</div>
     </section>
@@ -1411,6 +1401,16 @@ function adminView() {
         <label class="f w4">Check note<input class="in" data-p="${p.id}" data-k="check_note" value="${esc(p.check_note || '')}"></label></div>`).join('')}
       <div class="row"><button class="btn gold sm" data-act="save-payees">Save pay-to</button><button class="btn sm" data-act="payee-new">+ Pay-to</button></div>
     </section>
+    ${mgr ? `<section class="panel" style="grid-column:1/-1"><h2 class="sec">Roster & logins</h2>
+      <p class="small muted" style="margin-top:0">Each person signs in with the email listed here. Create their login in Supabase → Authentication → Users (same email).</p>
+      <table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Linked</th></tr></thead><tbody>
+      ${ms.map(m => `<tr><td><b>${esc(m.name)}</b><div class="small muted">${esc(m.instrument || '')}</div></td>
+        <td><input class="in" data-m="${m.id}" data-k="email" value="${esc(m.email || '')}" placeholder="email"></td>
+        <td><select class="in" style="min-width:112px" data-m="${m.id}" data-k="role"><option ${m.role === 'member' ? 'selected' : ''}>member</option><option ${m.role === 'manager' ? 'selected' : ''}>manager</option></select></td>
+        <td class="small">${m.user_id ? '<span style="color:var(--ok)">Yes</span>' : '<span class="faint">Not yet</span>'}</td></tr>`).join('')}
+      </tbody></table>
+      <div class="row" style="margin-top:12px"><button class="btn gold sm" data-act="save-members">Save roster</button></div>
+    </section>` : ''}
   </div>`;
 }
 
