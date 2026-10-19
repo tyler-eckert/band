@@ -303,6 +303,8 @@ function render() {
   const [sec, id] = route.split('/');
   const views = { home: homeView, gigs: gigsView, gig: () => gigView(id), setlists: setlistsView, setlist: () => setlistView(id), songs: songsView, money: moneyView, settings: settingsView };
   const sc0 = $('.scroll'), y = sc0 ? sc0.scrollTop : 0, same = S._route === route;
+  // opening Gigs from anywhere (except coming back from a gig you just looked at) always starts on Upcoming
+  if (sec === 'gigs' && !same && !String(S._route || '').startsWith('gig/')) { UI.gigFilter = 'upcoming'; UI.gigYear = 'all'; UI.gigSearch = ''; keepUI(); }
   app.innerHTML = shell(route, (views[sec] || homeView)());
   const sc1 = $('.scroll'); if (sc1) sc1.scrollTop = same ? y : 0;
   S._route = route;
@@ -1342,6 +1344,9 @@ function settingsView() {
   return `${title('The Band')}
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
+    <div class="f" style="margin-top:14px;max-width:460px"><span>Page-turner pedal</span>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn sm" data-act="ped-learn" data-v="next">Teach “next”</button><button class="btn sm" data-act="ped-learn" data-v="prev">Teach “previous”</button><button class="btn sm ghost" data-act="ped-reset">Reset</button></div>
+      <div class="small muted" id="pedStatus" style="margin-top:8px">Press a pedal switch — if nothing appears here, the iPad isn’t receiving keys from it (check the pedal’s mode).${UI.ped && (UI.ped.next || []).length ? ` Learned: next = ${esc(UI.ped.next[0].k)}${(UI.ped.prev || []).length ? ', previous = ' + esc(UI.ped.prev[0].k) : ''}.` : ''}</div></div>
     <label class="f" style="margin-top:14px;max-width:320px">Header position (iPad)<select class="in" data-hdr>${[[10, 'Snug'], [32, 'Medium'], [56, 'Low'], [80, 'Lowest']].map(([v, l]) => `<option value="${v}" ${(UI.hdr != null ? UI.hdr : 56) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:14px;max-width:320px">Footer position (iPad)<select class="in" data-ftr>${[[0, 'Lowest'], [6, 'Low'], [14, 'Medium'], [24, 'High'], [34, 'Highest']].map(([v, l]) => `<option value="${v}" ${(UI.fpx != null ? UI.fpx : 14) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:14px;max-width:320px">Text size<select class="in" data-text-size><option value="auto" ${UI.tz == null ? 'selected' : ''}>Auto (a bit larger on iPad)</option><option value="1" ${UI.tz === 1 ? 'selected' : ''}>Normal</option><option value="1.12" ${UI.tz === 1.12 ? 'selected' : ''}>Large</option><option value="1.25" ${UI.tz === 1.25 ? 'selected' : ''}>Extra large</option></select></label>
@@ -1737,14 +1742,15 @@ function gmPenToggle(on) {
 function gmPtr(e) {
   if (!GMK.on) return; const view = $('#gmView'); if (!view) return;
   if (e.type === 'pointerdown') {
-    if (e.pointerType === 'touch') { GMK.scroll = { id: e.pointerId, y: e.clientY, x: e.clientX, top: view.scrollTop, left: view.scrollLeft }; return; }     // fingers scroll, the Pencil draws
+    if (e.pointerType !== 'touch') GMK.lastPen = Date.now();
+    if (e.pointerType === 'touch') { if (GMK.cur || Date.now() - (GMK.lastPen || 0) < 900) return; GMK.scroll = { id: e.pointerId, y: e.clientY, x: e.clientX, top: view.scrollTop, left: view.scrollLeft }; return; }     // fingers scroll, the Pencil draws
     const ov = e.target.closest && e.target.closest('.gm-ov'); if (!ov || !GMK.key) return; e.preventDefault();
     if (ov.setPointerCapture) { try { ov.setPointerCapture(e.pointerId); } catch {} }
     const pg = Number(ov.dataset.pg), P = GM.pgs[pg], r = ov.getBoundingClientRect();
     GMK.cur = { id: e.pointerId, pg, r, P, removed: [], stroke: GMK.tool === 'erase' ? null : { t: GMK.tool === 'hl' ? 'hl' : 'pen', c: GMK.tool === 'hl' ? '#ffd400' : GMK.color, w: GMK.tool === 'hl' ? 0.024 : 0.0034, pg, pts: [] } };
     gmPtr({ type: 'pointermove', pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY, pressure: e.pressure, pointerType: e.pointerType, getCoalescedEvents: null, _first: true });
   } else if (e.type === 'pointermove') {
-    if (GMK.scroll && e.pointerId === GMK.scroll.id) { view.scrollTop = GMK.scroll.top - (e.clientY - GMK.scroll.y); view.scrollLeft = GMK.scroll.left - (e.clientX - GMK.scroll.x); return; }
+    if (GMK.scroll && e.pointerId === GMK.scroll.id) { if (GMK.cur || Date.now() - (GMK.lastPen || 0) < 900) { GMK.scroll = null; return; } const dy = e.clientY - GMK.scroll.y, dx = e.clientX - GMK.scroll.x; if (!GMK.scroll.go && Math.hypot(dx, dy) < 8) return; GMK.scroll.go = true; view.scrollTop = GMK.scroll.top - dy; view.scrollLeft = GMK.scroll.left - dx; return; }
     const c = GMK.cur; if (!c || e.pointerId !== c.id) return; if (!e._first) e.preventDefault && e.preventDefault();
     const evs = (e.getCoalescedEvents && e.getCoalescedEvents().length) ? e.getCoalescedEvents() : [e];
     for (const q of evs) {
@@ -1787,7 +1793,8 @@ function openGigMode(seq, lid, opts = {}) {
     <button class="gm-btn" data-gm="pen" id="gmPenBtn" aria-label="Pencil markup">Pen</button><button class="gm-btn" data-gm="zoom-out" aria-label="Smaller">A−</button><button class="gm-btn" data-gm="zoom-in" aria-label="Bigger">A+</button>${GM.preview ? '' : '<button class="gm-btn" data-gm="list" aria-label="Song list">☰</button>'}</div>
     <div class="gm-tools" id="gmTools" hidden></div><div class="gm-view" id="gmView"></div><div class="gm-bottom" id="gmBottom"></div><div class="gm-drawer" id="gmDrawer" hidden></div>`;
   document.body.appendChild(d);
-  d.addEventListener('click', gmClick); document.addEventListener('keydown', gmKey); document.addEventListener('visibilitychange', gmVis);
+  d.addEventListener('click', gmClick); document.addEventListener('keydown', gmKey, true); document.addEventListener('visibilitychange', gmVis);
+  d.addEventListener('selectstart', e => e.preventDefault()); d.setAttribute('tabindex', '-1'); try { d.focus({ preventScroll: true }); } catch {}
   const gv = d.querySelector('#gmView'); ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach(t => gv.addEventListener(t, gmPtr)); gv.addEventListener('contextmenu', e => { if (GMK.on) e.preventDefault(); });
   GMK.on = false; GMK.cur = null; marksSync();
   gmWake(); gmShow(GM.i); if (!GM.preview) gmPrefetch();
@@ -1796,7 +1803,7 @@ function openGigMode(seq, lid, opts = {}) {
 function closeGigMode(quiet) {
   gmMarksFlush(); GMK.on = false; GMK.cur = null;
   const d = $('#gigMode'); if (d) d.remove();
-  document.removeEventListener('keydown', gmKey); document.removeEventListener('visibilitychange', gmVis);
+  document.removeEventListener('keydown', gmKey, true); document.removeEventListener('visibilitychange', gmVis);
   if (GM.lock) { try { GM.lock.release(); } catch {} GM.lock = null; }
   if (GM.doc) { try { GM.doc.destroy(); } catch {} GM.doc = null; }
   GM.open = false; GM.tok++;
@@ -1814,12 +1821,23 @@ function gmTurn(dir) {
   if (room > 6) { if (v.scrollBy) v.scrollBy({ top: step, behavior: 'smooth' }); else v.scrollTop += step; }
   else gmShow(GM.i + dir);
 }
+const pedSig = e => ({ k: e.key, c: e.code || '', kc: e.keyCode || 0 });
+const pedHit = (e, list) => (list || []).some(s => (s.k && s.k !== 'Unidentified' && e.key === s.k) || (s.c && e.code && e.code === s.c) || (s.kc && e.keyCode === s.kc && (!s.k || s.k === 'Unidentified')));
 function gmKey(e) {
-  if (!GM.open || e.metaKey || e.ctrlKey || e.altKey) return; const k = e.key;
-  if (['ArrowRight', 'ArrowDown', 'PageDown', ' '].includes(k)) { e.preventDefault(); if (!e.repeat) gmTurn(1); }
-  else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(k)) { e.preventDefault(); if (!e.repeat) gmTurn(-1); }
+  if (!GM.open || e.metaKey || e.ctrlKey || e.altKey) return; const k = e.key, ped = UI.ped || {};
+  const next = pedHit(e, ped.next) || ['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(k) || [34, 39, 40, 32, 13].includes(e.keyCode);
+  const prev = pedHit(e, ped.prev) || ['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(k) || [33, 37, 38, 8].includes(e.keyCode);
+  if (next && !prev) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) gmTurn(1); }
+  else if (prev) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) gmTurn(-1); }
   else if (k === 'Escape') closeGigMode();
 }
+/* Pedal setup (Band tab → My preferences): shows exactly what the pedal sends and lets you teach "next" / "previous" */
+let pedLearn = null;
+document.addEventListener('keydown', e => {
+  const box = $('#pedStatus'); if (!box || GM.open) return; const s = pedSig(e);
+  if (pedLearn) { e.preventDefault(); UI.ped = UI.ped || { next: [], prev: [] }; UI.ped[pedLearn] = [s]; keepUI(); box.innerHTML = `Saved: <b>${pedLearn === 'next' ? 'Next' : 'Previous'}</b> = ${esc(s.k)} <span class="faint">(code ${esc(s.c || '—')}, keyCode ${s.kc || '—'})</span>`; pedLearn = null; $$('[data-act="ped-learn"]').forEach(b => b.classList.remove('on')); }
+  else box.innerHTML = `Last key received: <b>${esc(s.k)}</b> <span class="faint">(code ${esc(s.c || '—')}, keyCode ${s.kc || '—'})</span>`;
+}, true);
 function gmClick(e) {
   const el = e.target.closest('[data-gm]'); if (!el) return; const a = el.dataset.gm;
   if (a === 'exit') closeGigMode();
@@ -2042,6 +2060,8 @@ const ACTIONS = {
     for (let k = 0; k < rows.length; k++) { if (st) st.textContent = `Uploading ${k + 1} of ${rows.length}…`; try { await uploadChart(rows[k].songId, rows[k].file); ok++; } catch (e) { bad.push(`${rows[k].file.name}: ${e.message}`); } }
     closeModal(); render(); toast(bad.length ? `${ok} saved, ${bad.length} failed — ${bad[0]}` : `${ok} chart${ok === 1 ? '' : 's'} saved`, !!bad.length);
   },
+  'ped-learn': ({ v, el }) => { pedLearn = v; $$('[data-act="ped-learn"]').forEach(b => b.classList.toggle('on', b === el)); const box = $('#pedStatus'); if (box) box.textContent = `Now press the pedal switch you want for “${v === 'next' ? 'next' : 'previous'}”…`; },
+  'ped-reset': () => { UI.ped = null; pedLearn = null; keepUI(); const box = $('#pedStatus'); if (box) box.textContent = 'Back to the standard keys (arrows, Page Up/Down, Space).'; },
   'gig-edit': ({ g }) => { if (!g) return; S.editGig = g.id; render(); },
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
   'gig-chk': async ({ el, g }) => {
