@@ -54,9 +54,13 @@ const api = window.__BAND_MOCK__ || {
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
+const TRAINING = [
+  { key: 'guide', title: 'Member guide', sub: '17 pages: install, every feature, troubleshooting', file: 'HQ-Member-Guide.pdf' },
+  { key: 'quick', title: 'Quick start', sub: 'One page: install on iPhone, iPad or Android', file: 'HQ-Quick-Start.pdf' },
+];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 53;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 55;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -397,7 +401,7 @@ function shell(route, inner) {
       <button type="button" class="srch-btn" data-act="search-open" aria-label="Search" title="Search (press /)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg></button>
       <button type="button" class="who" data-act="who-menu" title="Account">${me ? `<img src="${photo(me)}" alt=""><span class="nm small muted">${esc(me.name)}</span>` : ''}</button>
     </div>
-    <div class="who-menu" id="whoMenu" hidden><button class="btn" data-act="signout">Sign out</button></div>
+    <div class="who-menu" id="whoMenu" hidden><button class="btn" data-act="training">Training docs</button><button class="btn" data-act="signout">Sign out</button></div>
   </header>
   ${S.offline ? '<div class="offline-bar"><span>Offline — showing the data saved on this device. View only.</span><button class="btn sm" data-act="go-online">Retry</button></div>' : ''}
   <div class="scroll"><main class="view">${inner}</main></div>
@@ -1922,6 +1926,11 @@ async function idbClear() { try { const db = await idb(); await Promise.all(['pd
 async function idbEntries(store) { try { const db = await idb(); return await new Promise(res => { const out = []; const q = db.transaction(store).objectStore(store).openCursor(); q.onsuccess = () => { const c = q.result; if (c) { out.push([c.key, c.value]); c.continue(); } else res(out); }; q.onerror = () => res(out); }); } catch { return []; } }
 const cacheGet = key => idbGet('pdf', key), cachePut = (key, buf) => idbPut('pdf', key, buf);
 async function chartData(c) {
+  if (c.url) {                                                          // a training document that lives next to index.html
+    const key = 'doc|' + c.url;
+    try { const r = await fetch(c.url, { cache: 'no-cache' }); if (!r.ok) throw new Error('missing'); const buf = await r.arrayBuffer(); cachePut(key, buf); return buf; }
+    catch { const buf = await cacheGet(key); if (buf) return buf; throw new Error('Couldn’t load that document. Try again when you’re online.'); }
+  }
   const key = `${c.path}|${c.updated_at || c.created_at || ''}`;
   let buf = await cacheGet(key); if (buf) return buf;
   const blob = await api.downloadChart(c.path); buf = await blob.arrayBuffer(); cachePut(key, buf); return buf;
@@ -2068,6 +2077,7 @@ function gmToolsHtml() {
 }
 function gmPenToggle(on) {
   GMK.on = on == null ? !GMK.on : on; const d = $('#gigMode'); if (!d) return; d.classList.toggle('gm-pen', GMK.on);
+  setTimeout(() => { if (GM.open) { gmMarksFlush(); gmLoadChart(); } }, 40);                                  // the toolbar changes the viewing height: re-fit the whole page
   const t = $('#gmTools'); if (t) { t.hidden = !GMK.on; t.innerHTML = GMK.on ? gmToolsHtml() : ''; } const b = $('#gmPenBtn'); if (b) b.classList.toggle('on', GMK.on);
 }
 function gmPtr(e) {
@@ -2115,9 +2125,9 @@ function gmSeq(L) { return itemsOf(L.id).filter(i => i.played).sort((a, b) => a.
 function openGigMode(seq, lid, opts = {}) {
   if (!seq.length) return toast('Add songs first.', true);
   closeGigMode(true);
-  Object.assign(GM, { open: true, seq, lid, preview: !!opts.preview, zoom: 1, tok: 0, drawer: false });
+  Object.assign(GM, { open: true, seq, lid, preview: !!opts.preview, isDoc: opts.doc || null, zoom: 1, tok: 0, drawer: false });
   const saved = lid ? Number(sessionStorage.getItem('tfgm:' + lid)) : 0; GM.i = saved >= 0 && saved < seq.length ? saved : 0;
-  const d = document.createElement('div'); d.id = 'gigMode'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', 'Gig mode');
+  const d = document.createElement('div'); d.id = 'gigMode'; if (opts.doc) d.classList.add('gm-doc'); d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', 'Gig mode');
   d.innerHTML = `<div class="gm-top"><button class="gm-btn" data-gm="exit" aria-label="Exit gig mode">✕</button>
     <div class="gm-title"><div class="gm-t1" id="gmT1"></div><div class="gm-t2"><span id="gmT2"></span><span id="gmPg"></span> <span id="gmPre"></span></div></div>
     <button class="gm-awake" data-gm="awake" id="gmAwake"></button>
@@ -2254,11 +2264,12 @@ function gmShow(i, toEnd) {
   GM.i = i; if (GM.lid) sessionStorage.setItem('tfgm:' + GM.lid, String(i));
   const cur = GM.seq[i], s = cur.song || {}, inSet = GM.seq.filter(x => x.set === cur.set), pos = inSet.indexOf(cur) + 1;
   $('#gmT1').textContent = s.title || '(deleted song)';
-  $('#gmT2').textContent = GM.preview ? songLabel(s) : `Set ${cur.set} · ${pos} of ${inSet.length} · song ${i + 1}/${GM.seq.length}`;
+  $('#gmT2').textContent = GM.preview ? (GM.isDoc ? 'Training document' : songLabel(s)) : `Set ${cur.set} · ${pos} of ${inSet.length} · song ${i + 1}/${GM.seq.length}`;
   $('#gmBottom').innerHTML = gmBottom(); gmBadge(); gmLoadChart();
 }
 function gmBottom() {
   const cur = GM.seq[GM.i], nxt = GM.seq[GM.i + 1], s = cur.song || {};
+  if (GM.isDoc) return `<div class="gm-info"><b>${esc(GM.isDoc.title)}</b> <span class="gm-bits">${esc(GM.isDoc.sub)} · swipe up for the next page · A+ to zoom</span></div>`;
   if (GM.preview) return `<div class="gm-info"><b>${esc(s.title || '')}</b> <span class="gm-bits">Key ${esc(s.song_key || '?')}${s.capo ? ' · capo ' + s.capo : ''}${s.bpm ? ' · ♩ ' + s.bpm + ' BPM' : ''}${s.starter ? ' · Starts: ' + esc(s.starter) : ''}${s.lead_vox ? ' · Lead: ' + esc(s.lead_vox) : ''}</span></div>`;
   const say = cur.item && cur.item.note;
   let next;
@@ -2510,6 +2521,16 @@ const ACTIONS = {
   },
   'digest-test': async () => { if (!S.me.email) return toast('Add your email under Admin → Roster first.', true); const r = await digestCall('test=' + encodeURIComponent(S.me.email)); if (r) toast(r.failed && r.failed.length ? 'Failed: ' + r.failed[0] : `Test digest sent to ${(r.sent || [])[0] || S.me.email}`, !!(r.failed && r.failed.length)); },
   'search-open': () => openSearch(),
+  'training': () => {
+    const m = $('#whoMenu'); if (m) m.hidden = true;
+    openModal(`<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(520px,100%)"><div class="row"><h2 class="sec" style="margin:0">Training docs</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div>
+      <div class="list" style="margin-top:10px">${TRAINING.map(d => `<div class="li"><div class="grow"><div class="t">${esc(d.title)}</div><div class="s">${esc(d.sub)}</div></div><button class="btn gold" data-act="training-open" data-k="${d.key}">Read</button></div>`).join('')}</div>
+      <p class="small muted" style="margin:12px 0 0">To send one to someone, share the link: ${esc(location.host)}/${TRAINING[0].file}</p></div></div>`);
+  },
+  'training-open': ({ el }) => {
+    const d = TRAINING.find(x => x.key === el.dataset.k); if (!d) return; closeModal();
+    openGigMode([{ item: {}, song: { title: d.title }, set: 1, forceChart: { path: 'training/' + d.file, url: d.file, filename: d.file } }], null, { preview: true, doc: d });
+  },
   'who-menu': () => { const m = $('#whoMenu'); if (m) m.hidden = !m.hidden; },
   'ds-print': () => window.print(),
   'ds-copy': ({ g }) => g && copy(daySheetText(g)),
