@@ -43,6 +43,7 @@ const api = window.__BAND_MOCK__ || {
   async removeChart(path) { const { error } = await supa.storage.from('band-charts').remove([path]); if (error) throw error; },
   async upsertMarks(rows) { const { error } = await supa.from('chart_marks').upsert(rows, { onConflict: 'member_id,song_id,chart_path' }); if (error) throw error; },
   async getMarks(songIds) { const { data, error } = await supa.from('chart_marks').select('*').in('song_id', songIds); if (error) throw error; return data || []; },
+  async recentActivity(n) { const { data, error } = await supa.from('activity').select('*').order('at', { ascending: false }).limit(n); if (error) throw error; return data || []; },
   async remove(table, match) {
     let q = supa.from(table).delete();
     for (const [k, v] of Object.entries(match)) q = Array.isArray(v) ? q.in(k, v) : q.eq(k, v);
@@ -53,7 +54,9 @@ const api = window.__BAND_MOCK__ || {
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
-const APP_V = 46;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
+S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
+const APP_V = 51;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -62,6 +65,10 @@ const isNetErr = e => /failed to fetch|networkerror|load failed|network request|
 async function loadAll() {
   const res = await Promise.all(TABLES.map(t => api.all(t).catch(e => { if (OPTIONAL.includes(t)) return []; throw e; })));
   TABLES.forEach((t, i) => S[t] = res[i]);
+  const probe = TRASHABLE.map(t => S[t]).find(rows => rows.length);                          // does the database have the deleted_at column yet?
+  S._trashReady = probe ? 'deleted_at' in probe[0] : S._trashReady !== false;
+  TRASHABLE.forEach(t => { S._trash[t] = S[t].filter(r => r.deleted_at); S[t] = S[t].filter(r => !r.deleted_at); });
+  try { S.activity = api.recentActivity ? await api.recentActivity(300) : []; S._actReady = true; } catch { S.activity = []; S._actReady = false; }
   S.loaded = true;
   S.me = S.members.find(m => S.session && m.user_id === S.session.user.id) || null;
   snapSaveSoon(); setTimeout(prefetchUpcoming, 2500);
@@ -110,19 +117,108 @@ async function upsertTolerant(table, rows) {
   }
   throw new Error('Could not save — the database is missing several columns. Run the latest SQL update in Supabase.');
 }
+/* ============================================================ activity log + trash */
+const ACT_TABLES = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
+const ACT_SKIP = new Set(['updated_at', 'created_at', 'deleted_at', 'photos', 'checklist_na', 'sort', 'plan', 'parts', 'ics_token', 'quoted_on', 'invoiced_on', 'deposit_received_on', 'paid_on']);
+const ACT_LABEL = { gig_date: 'Date', start_time: 'Start', end_time: 'End', load_in_time: 'Load-in', soundcheck_time: 'Sound check', deposit_amount: 'Deposit', client_id: 'Client', song_key: 'Key', length_min: 'Length', lead_vox: 'Lead vox', default_set: 'Default set', onsite_contact: 'On-site contact', onsite_phone: 'On-site phone', stage_power: 'Stage & power', food_notes: 'Food', gear_notes: 'Gear', dress_code: 'Dress code', deposit_received: 'Deposit received', paperwork_signed: 'Paperwork signed', invoice_sent: 'Invoice sent', paid_in_full: 'Paid in full', details_sent: 'Details sent', is_opener: 'Good opener', is_closer: 'Good closer', is_encore: 'Good encore', contact_name: 'Contact', org: 'Organization', city_state_zip: 'City/State/ZIP', address1: 'Street', set_count: 'Sets', break_count: 'Breaks', break_min: 'Break (min)' };
+const actField = k => ACT_LABEL[k] || (k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '));
+function actValue(k, v) {
+  if (v === null || v === undefined || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'yes' : 'no';
+  if (k === 'client_id') { const c = byId('clients', v); return c ? (c.org || c.contact_name) : 'a client'; }
+  if (/_date$|_on$/.test(k) && /^\d{4}-\d\d-\d\d/.test(String(v))) return mdY(String(v).slice(0, 10));
+  if (['quote', 'paid', 'tips', 'amount', 'deposit_amount'].includes(k) && !isNaN(v)) return money(v);
+  const s = typeof v === 'object' ? '…' : String(v); return s.length > 42 ? s.slice(0, 40) + '…' : s;
+}
+function actTitle(table, r) {
+  if (table === 'gigs') return (r.kind === 'practice' ? 'Practice' : r.title) + (r.gig_date ? ' · ' + mdY(r.gig_date) : '');
+  if (table === 'songs') return r.title;
+  if (table === 'setlists') return slName(r);
+  if (table === 'clients') return r.org || r.contact_name || 'Client';
+  if (table === 'expenses') return `${money(r.amount, true)} · ${r.note || r.category || 'expense'}`;
+  return table;
+}
+function diffRows(old, now) {
+  const out = []; Object.keys(now).forEach(k => { if (ACT_SKIP.has(k) || k === 'id') return; const a = old[k] ?? null, b = now[k] ?? null; if (typeof a === 'object' && a !== null || typeof b === 'object' && b !== null) return; if (a !== b && !(a === '' && b === null) && !(a === null && b === '')) out.push({ f: actField(k), from: actValue(k, a), to: actValue(k, b) }); });
+  return out.slice(0, 8);
+}
+async function logActivity(action, table, row, changes) {          // best-effort: never blocks or breaks the real save
+  if (!S.me || S.offline || !S._actReady || !ACT_TABLES.includes(table)) return;
+  try {
+    const now = new Date(), title = actTitle(table, row);
+    const last = action === 'updated' ? S.activity.find(a => a.member_id === S.me.id && a.entity === table && a.entity_id === row.id && a.action === 'updated' && now - new Date(a.at) < 600000) : null;
+    if (last) {                                                       // keep several quick edits to one thing as a single entry
+      const merged = [...(last.changes || [])]; (changes || []).forEach(c => { const m = merged.find(x => x.f === c.f); if (m) m.to = c.to; else merged.push(c); });
+      const rec = { ...last, at: now.toISOString(), title, changes: merged.filter(c => c.from !== c.to).slice(0, 8) };
+      await api.upsert('activity', [rec]); S.activity[S.activity.indexOf(last)] = rec;
+    } else {
+      const rec = { id: uuid(), at: now.toISOString(), member_id: S.me.id, who: S.me.name, action, entity: table, entity_id: row.id, title, changes: changes || [] };
+      await api.upsert('activity', [rec]); S.activity.unshift(rec);
+    }
+  } catch (e) { if (/activity|relation|schema cache|does not exist/i.test((e && e.message) || '')) S._actReady = false; }
+}
+const activityFor = (table, id, n = 8) => S.activity.filter(a => a.entity === table && a.entity_id === id).slice(0, n);
+function agoText(at) {
+  if (!at) return ''; const ms = Date.now() - new Date(at).getTime(), m = Math.round(ms / 60000);
+  if (m < 1) return 'just now'; if (m < 60) return m + ' min ago'; const h = Math.round(m / 60); if (h < 24) return h + ' hr ago';
+  const d = Math.round(h / 24); return d === 1 ? 'yesterday' : d < 14 ? d + ' days ago' : mdY(String(at).slice(0, 10));
+}
+const TRASH_LABEL = { gigs: 'Gig', songs: 'Song', setlists: 'Setlist', clients: 'Client', expenses: 'Expense' };
+const trashName = (t, r) => actTitle(t, r);
+/* Delete = move to Trash (with an Undo). Without the column in the database it falls back to a permanent delete, as before. */
+async function softDel(table, id) {
+  const row = S[table].find(r => r.id === id); if (!row) return false;
+  if (!S._trashReady) { await del(table, id); toast('Deleted for good — run the latest SQL update to get Trash & Undo.', true); return false; }
+  const [saved] = await upsertTolerant(table, [{ ...row, deleted_at: new Date().toISOString() }]);
+  S[table] = S[table].filter(r => r.id !== id); S._trash[table].unshift(saved); snapSaveSoon();
+  logActivity('deleted', table, row, []); return true;
+}
+async function deleteWithUndo(table, id, label) {
+  const ok = await guard(() => softDel(table, id)); if (!ok) return false;
+  toastUndo(`${label} moved to Trash`, async () => { await restoreItem(table, id); render(); toast('Restored'); });
+  return true;
+}
+async function restoreItem(table, id) {
+  const row = S._trash[table].find(r => r.id === id); if (!row) return;
+  const [saved] = await upsertTolerant(table, [{ ...row, deleted_at: null }]);
+  S._trash[table] = S._trash[table].filter(r => r.id !== id); S[table].push(saved); snapSaveSoon();
+  logActivity('restored', table, saved, []);
+}
+async function purgeItem(table, id) {
+  const row = S._trash[table].find(r => r.id === id); if (!row) return;
+  if (table === 'songs') { await api.remove('setlist_items', { song_id: id }); S.setlist_items = S.setlist_items.filter(i => i.song_id !== id); }
+  if (table === 'setlists') { await api.remove('setlist_items', { setlist_id: id }); S.setlist_items = S.setlist_items.filter(i => i.setlist_id !== id); }
+  await api.remove(table, { id }); S._trash[table] = S._trash[table].filter(r => r.id !== id);
+  logActivity('purged', table, row, []);
+}
+function trackSave(table, old, saved) {
+  if (table === 'setlist_items') { const L = byId('setlists', saved.setlist_id); if (L) logActivity('updated', 'setlists', L, [{ f: 'Songs', from: '', to: 'changed' }]); return; }
+  if (!ACT_TABLES.includes(table)) return;
+  if (!old) return void logActivity('created', table, saved, []);
+  const ch = diffRows(old, saved); if (ch.length) logActivity('updated', table, saved, ch);
+}
+async function digestCall(query) {                                  // talks to the band-digest function (secret token, not a login)
+  const st = settings(); if (!st.ics_token) { toast('No calendar token yet — open the Calendar section on Home once.', true); return null; }
+  try {
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/band-digest?token=${st.ics_token}&${query}`), txt = await r.text(); let j = null; try { j = JSON.parse(txt); } catch {}
+    if (!r.ok) { toast(r.status === 404 ? 'The digest function isn’t set up yet (deploy band-digest, JWT verification off).' : ((j && (j.error || (j.failed && j.failed[0]))) || 'Digest error ' + r.status), true); return null; }
+    return j;
+  } catch (e) { toast('Couldn’t reach the digest function — ' + (navigator.onLine === false ? 'you’re offline.' : 'is it deployed?'), true); return null; }
+}
 async function save(table, row) {
+  const old = ACT_TABLES.includes(table) ? S[table].find(r => r.id === row.id) : null, oldCopy = old ? { ...old } : null;
   const [saved] = await upsertTolerant(table, [row]);
   const keys = PK[table] || ['id'];
   const i = S[table].findIndex(r => keys.every(k => r[k] === saved[k]));
   if (i >= 0) S[table][i] = saved; else S[table].push(saved);
-  snapSaveSoon(); return saved;
+  snapSaveSoon(); trackSave(table, oldCopy, saved); return saved;
 }
 async function saveMany(table, rows) {
   if (!rows.length) return [];
   const saved = await upsertTolerant(table, rows);
   const keys = PK[table] || ['id'];
   saved.forEach(r => { const i = S[table].findIndex(x => keys.every(k => x[k] === r[k])); if (i >= 0) S[table][i] = r; else S[table].push(r); });
-  snapSaveSoon(); return saved;
+  snapSaveSoon(); if (table === 'setlist_items' && saved.length) trackSave(table, null, saved[0]); return saved;
 }
 async function del(table, id) {
   await api.remove(table, { id });
@@ -160,6 +256,11 @@ function toast(msg, err) {
   const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg;
   document.body.appendChild(t); setTimeout(() => t.remove(), err ? 5000 : 2200);
 }
+function toastUndo(msg, onUndo) {
+  const t = document.createElement('div'); t.className = 'toast with-act'; t.innerHTML = '<span></span><button type="button" class="toast-act">Undo</button>'; t.firstChild.textContent = msg;
+  t.querySelector('button').onclick = async () => { t.remove(); try { await onUndo(); } catch (e) { toast(e.message || 'Could not undo', true); } };
+  document.body.appendChild(t); setTimeout(() => t.remove(), 9000);
+}
 async function guard(fn, okMsg) {
   try { const r = await fn(); if (okMsg) toast(okMsg); return r; }
   catch (e) { console.error(e); toast(e.message || 'Something went wrong — nothing was saved.', true); }
@@ -189,7 +290,8 @@ const pay = g => depositIn(g) + n0(g.paid);                                  // 
 const merchOf = g => n0(g.merch) + salesFor(g.id);
 const gross = g => pay(g) + n0(g.tips) + merchOf(g);
 const balanceDue = g => g.status === 'complete' && !g.paid_in_full && n0(g.quote) > 0 ? Math.max(0, n0(g.quote) - pay(g)) : 0;
-const itemsOf = lid => S.setlist_items.filter(i => i.setlist_id === lid).sort((a, b) => a.set_no - b.set_no || a.position - b.position);
+const trashedSong = id => S._trash.songs.length > 0 && S._trash.songs.some(s => s.id === id);
+const itemsOf = lid => S.setlist_items.filter(i => i.setlist_id === lid && !trashedSong(i.song_id)).sort((a, b) => a.set_no - b.set_no || a.position - b.position);
 const listOf = gid => S.setlists.find(l => l.gig_id === gid);
 const setItems = gid => { const l = listOf(gid); return l ? itemsOf(l.id) : []; };
 const gigOf = L => L && L.gig_id ? byId('gigs', L.gig_id) : null;
@@ -218,7 +320,7 @@ const songLabel = s => `${s.song_key || '?'}${s.capo ? ' · capo ' + s.capo : ''
 /* ----- “needs attention” — the admin queue ----- */
 function attention() {
   const st = settings(), t = todayIso(), out = [];
-  const add = (sev, g, text, act) => out.push({ sev, g, text, act });
+  const add = (sev, g, text, act, href) => out.push({ sev, g, text, act, href });
   const terms = parseInt((st.default_terms || 'NET30').replace(/\D/g, '')) || 30;
   S.gigs.filter(isGig).forEach(g => {
     const d = g.gig_date;
@@ -234,7 +336,22 @@ function attention() {
     if (['confirmed'].includes(g.status) && d && d >= t && days(t, d) <= (st.remind_setlist_days || 14) && !setItems(g.id).length) add(days(t, d) <= 5 ? 'hi' : 'md', g, `Gig in ${days(t, d)} days and no setlist yet.`, 'Build set');
     if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 21 && (!g.start_time || !g.venue || /tbd/i.test(g.venue || ''))) add('md', g, 'Missing start time or venue — lock in details with the client.', 'Details');
     if (g.status === 'confirmed' && !d) add('md', g, 'Booked but no date set.', 'Details');
-    if (g.status === 'inquiry' && !g.quote) add('md', g, 'New lead — send a quote.', 'Quote');
+    if (g.status === 'inquiry' && !g.quote) { const age = g.created_at ? days(String(g.created_at).slice(0, 10), t) : 0; add(age >= 2 ? 'hi' : 'md', g, age >= 2 ? `Lead is ${age} days old with no quote — reply today.` : 'New lead — send a quote.', 'Quote'); }
+    if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 30 && !n0(g.quote)) add('md', g, 'Booked but no price recorded — add the quote so the invoice is right.', 'Quote');
+    if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 14) {                               // gig-readiness: what the band and the day sheet need
+      const L = listOf(g.id), its = L ? itemsOf(L.id).filter(i => i.played) : [], c = clientOf(g);
+      if (!g.load_in_time) add('md', g, 'No load-in time yet — the band needs it.', 'Load-in');
+      if (!g.address) add('md', g, 'No venue address saved.', 'Address');
+      if (days(t, d) <= 7 && !g.onsite_contact && !g.onsite_phone) add('lo', g, 'No on-site contact on the day sheet.', 'Day sheet', `#daysheet/${g.id}`);
+      if (!c) add('md', g, 'No client attached — pick or add one.', 'Client');
+      else if (!c.email && !c.phone) add('lo', g, `No email or phone saved for ${c.org || c.contact_name}.`, 'Client');
+      if (its.length) {
+        const mins = its.reduce((a, i) => a + n0((byId('songs', i.song_id) || {}).length_min), 0), pl = planOf(slCtx(L));
+        if (pl.slot != null && Math.abs(mins - pl.music) > 12) add('lo', g, `Setlist is ${Math.round(Math.abs(mins - pl.music))} min ${mins < pl.music ? 'short of' : 'over'} the ${hm(pl.music)} of music in the slot.`, 'Check set', `#setlist/${L.id}`);
+        const learning = its.map(i => byId('songs', i.song_id)).filter(s => s && s.status === 'learning'); if (days(t, d) <= 14 && learning.length) add('lo', g, `Still marked “learning”: ${learning.slice(0, 3).map(s => s.title).join(', ')}${learning.length > 3 ? '…' : ''}.`, 'Practice', `#setlist/${L.id}`);
+        if (S.me && S.song_charts.some(x => x.member_id === S.me.id)) { const miss = its.filter(i => !chartFor(i.song_id)).length; if (miss) add('lo', g, `${miss} song${miss === 1 ? '' : 's'} in this setlist ${miss === 1 ? 'has' : 'have'} no chart for you.`, 'Charts', `#setlist/${L.id}`); }
+      }
+    }
     if (g.status === 'quoted' && g.quoted_on && days(g.quoted_on, t) >= (st.remind_quote_days || 10)) add('md', g, `Quote sent ${days(g.quoted_on, t)} days ago with no answer — follow up.`, 'Follow up');
     if (g.status === 'quoted' && d && d < t) add('lo', g, 'Quoted date has passed — mark it passed or update the date.', 'Update');
   });
@@ -270,13 +387,14 @@ const NAV = [['home','Home','home'],['gigs','Gigs','gigs'],['setlists','Sets','s
 
 function shell(route, inner) {
   const sec = route.split('/')[0];
-  const on = k => (k === sec || (k === 'gigs' && sec === 'gig') || (k === 'setlists' && sec === 'setlist')) ? 'on' : '';
+  const on = k => (k === sec || (k === 'gigs' && (sec === 'gig' || sec === 'daysheet')) || (k === 'setlists' && sec === 'setlist')) ? 'on' : '';
   const me = S.me;
   return `
   <header class="top">
     <a class="brand" href="#home"><img src="assets/logo.png" alt="Trailer Folk"><span class="hide-sm">HQ</span></a>
     <div class="row" style="gap:0;align-items:stretch">
       <nav class="nav">${NAV.map(([k, l]) => `<a href="#${k}" class="${on(k)}">${l}</a>`).join('')}</nav>
+      <button type="button" class="srch-btn" data-act="search-open" aria-label="Search" title="Search (press /)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg></button>
       <button type="button" class="who" data-act="who-menu" title="Account">${me ? `<img src="${photo(me)}" alt=""><span class="nm small muted">${esc(me.name)}</span>` : ''}</button>
     </div>
     <div class="who-menu" id="whoMenu" hidden><button class="btn" data-act="signout">Sign out</button></div>
@@ -307,7 +425,7 @@ function render() {
   if (route === 'calendar') { route = 'home'; history.replaceState(null, '', '#home'); }
   if (route === 'settings') { route = 'prefs'; history.replaceState(null, '', '#prefs'); }                // the old Band page was split into Prefs and Admin              // the calendar now lives at the bottom of Home
   const [sec, id] = route.split('/');
-  const views = { home: homeView, gigs: gigsView, gig: () => gigView(id), setlists: setlistsView, setlist: () => setlistView(id), songs: songsView, money: moneyView, prefs: prefsView, admin: adminView };
+  const views = { home: homeView, gigs: gigsView, gig: () => gigView(id), daysheet: () => daySheetView(id), setlists: setlistsView, setlist: () => setlistView(id), songs: songsView, money: moneyView, prefs: prefsView, admin: adminView };
   const sc0 = $('.scroll'), y = sc0 ? sc0.scrollTop : 0, same = S._route === route;
   // opening Gigs from anywhere (except coming back from a gig you just looked at) always starts on Upcoming
   if (sec === 'gigs' && !same && !String(S._route || '').startsWith('gig/')) { UI.gigFilter = 'upcoming'; UI.gigYear = 'all'; UI.gigSearch = ''; keepUI(); }
@@ -493,6 +611,114 @@ function photosPanel(g, editing) {
   return `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Photos</h2><span class="spacer"></span><label class="btn sm gold" style="cursor:pointer">+ Add photo<input type="file" accept="image/*" hidden data-photo="${g.id}"></label></div>
     ${ph.length ? `<div class="photos" style="margin-top:12px">${ph.map(p => `<div class="ph"><img data-ph="${esc(p.path)}" data-act="photo-open" alt="Gig photo">${editing ? `<button class="ib" data-act="photo-del" data-path="${esc(p.path)}" title="Remove photo">✕</button>` : ''}</div>`).join('')}</div>` : '<p class="small muted" style="margin:10px 0 0">Load-in map, stage plot, parking — add a photo and everyone can see it here.</p>'}</section>`;
 }
+/* ============================================================ global search */
+const SRCH = { sel: 0, list: [] };
+function srchGroups(q) {
+  const toks = q.toLowerCase().split(/\s+/).filter(Boolean), t = todayIso();
+  const hit = (hay, title) => { const h = hay.join(' ').toLowerCase(); if (!toks.every(k => h.includes(k))) return -1; const tl = String(title || '').toLowerCase(); return tl.startsWith(q.toLowerCase()) ? 0 : tl.includes(toks[0]) ? 1 : 2; };
+  if (!toks.length) { return [{ t: 'gigs', label: 'Coming up', items: S.gigs.filter(g => g.gig_date && g.gig_date >= t && !['passed', 'cancelled'].includes(g.status)).sort((a, b) => a.gig_date.localeCompare(b.gig_date)).slice(0, 5).map(g => srchGig(g)) }]; }
+  const gigs = S.gigs.map(g => { const c = clientOf(g) || {}, d = g.gig_date || ''; const s = hit([g.kind === 'practice' ? 'practice' : g.title, g.venue, g.address, g.notes, STATUS_LABEL[g.status], d, d && mdY(d), d && fmtDate(d), g.onsite_contact, c.org, c.contact_name, c.email, c.phone], g.kind === 'practice' ? 'practice' : g.title); return s < 0 ? null : { s, d, it: srchGig(g) }; }).filter(Boolean)
+    .sort((a, b) => a.s - b.s || ((a.d >= t) === (b.d >= t) ? (a.d >= t ? a.d.localeCompare(b.d) : b.d.localeCompare(a.d)) : (a.d >= t ? -1 : 1)));
+  const songs = S.songs.map(s => { const r = hit([s.title, s.artist, s.song_key, s.genre, s.lead_vox, s.starter, s.tuning, s.comment, s.status, s.is_opener && 'opener', s.is_closer && 'closer', s.is_encore && 'encore'], s.title); return r < 0 ? null : { s: r, it: { t: 'songs', id: s.id, title: s.title, sub: [s.artist, s.song_key && 'Key ' + s.song_key, s.bpm && s.bpm + ' BPM'].filter(Boolean).join(' · '), tag: cap(s.status || 'active') } }; }).filter(Boolean).sort((a, b) => a.s - b.s || a.it.title.localeCompare(b.it.title));
+  const clients = S.clients.map(c => { const r = hit([c.org, c.contact_name, c.email, c.phone, c.code, c.address1, c.city_state_zip], c.org || c.contact_name); return r < 0 ? null : { s: r, it: { t: 'clients', id: c.id, title: c.org || c.contact_name, sub: [c.contact_name !== c.org && c.contact_name, c.email, c.phone].filter(Boolean).join(' · '), tag: S.gigs.filter(g => g.client_id === c.id).length + ' gigs' } }; }).filter(Boolean).sort((a, b) => a.s - b.s);
+  const sets = S.setlists.map(L => { const gg = gigOf(L), nm = slName(L); const r = hit([nm, gg && gg.title, gg && gg.venue], nm); return r < 0 ? null : { s: r, it: { t: 'setlists', id: L.id, title: nm, sub: gg ? 'For ' + gg.title + (gg.gig_date ? ' · ' + mdY(gg.gig_date) : '') : 'Draft setlist', tag: 'Setlist' } }; }).filter(Boolean).sort((a, b) => a.s - b.s);
+  return [{ t: 'gigs', label: 'Gigs', items: gigs.map(x => x.it) }, { t: 'songs', label: 'Songs', items: songs.map(x => x.it) }, { t: 'clients', label: 'Clients', items: clients.map(x => x.it) }, { t: 'setlists', label: 'Setlists', items: sets.map(x => x.it) }];
+}
+const srchGig = g => ({ t: 'gigs', id: g.id, title: g.kind === 'practice' ? 'Practice' : g.title, sub: [g.gig_date && fmtDate(g.gig_date), g.venue, (clientOf(g) || {}).org].filter(Boolean).join(' · '), tag: g.kind === 'practice' ? 'Practice' : STATUS_LABEL[g.status] || '' });
+function srchRender(q) {
+  const box = $('#srchRes'); if (!box) return; const groups = srchGroups(q.trim()); SRCH.list = []; SRCH.sel = 0;
+  const any = groups.some(g => g.items.length);
+  box.innerHTML = any ? groups.filter(g => g.items.length).map(g => `<div class="srch-g"><div class="eyebrow">${g.label}${q.trim() ? ` · ${g.items.length}` : ''}</div>${g.items.slice(0, 8).map(it => { const k = SRCH.list.push(it) - 1; return `<button type="button" class="srch-item ${k === 0 ? 'sel' : ''}" data-srch="go" data-k="${k}"><span class="grow"><span class="t">${esc(it.title)}</span><span class="s">${esc(it.sub)}</span></span><span class="pill" style="color:var(--muted)">${esc(it.tag)}</span></button>`; }).join('')}${g.items.length > 8 ? `<div class="small faint" style="padding:4px 14px">+${g.items.length - 8} more — keep typing to narrow it down</div>` : ''}</div>`).join('')
+    : `<div class="empty">${q.trim() ? 'Nothing matches “' + esc(q.trim()) + '”.' : 'Type to search songs, gigs and clients.'}</div>`;
+}
+function srchOpenItem(it) {
+  closeSearch();
+  if (it.t === 'gigs') location.hash = '#gig/' + it.id;
+  else if (it.t === 'setlists') location.hash = '#setlist/' + it.id;
+  else if (it.t === 'songs') openModal(songModal(byId('songs', it.id)));
+  else if (it.t === 'clients') openModal(clientModal(byId('clients', it.id)));
+}
+function srchMove(d) { const items = $$('.srch-item'); if (!items.length) return; SRCH.sel = (SRCH.sel + d + items.length) % items.length; items.forEach((el, i) => el.classList.toggle('sel', i === SRCH.sel)); items[SRCH.sel].scrollIntoView && items[SRCH.sel].scrollIntoView({ block: 'nearest' }); }
+function openSearch() {
+  closeSearch(); const d = document.createElement('div'); d.id = 'searchBox'; d.className = 'srch';
+  d.innerHTML = '<div class="srch-top"><input id="srchIn" type="search" class="in" placeholder="Search songs, gigs, clients…" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"><button type="button" class="btn" data-srch="close">Close</button></div><div class="srch-res" id="srchRes"></div>';
+  document.body.appendChild(d); const inp = $('#srchIn'); inp.oninput = () => srchRender(inp.value);
+  d.addEventListener('click', e => { const b = e.target.closest('[data-srch]'); if (!b) { if (e.target === d) closeSearch(); return; } if (b.dataset.srch === 'close') closeSearch(); else if (b.dataset.srch === 'go') srchOpenItem(SRCH.list[Number(b.dataset.k)]); });
+  inp.addEventListener('keydown', e => { if (e.key === 'ArrowDown') { e.preventDefault(); srchMove(1); } else if (e.key === 'ArrowUp') { e.preventDefault(); srchMove(-1); } else if (e.key === 'Enter') { e.preventDefault(); const it = SRCH.list[SRCH.sel]; if (it) srchOpenItem(it); } });
+  srchRender(''); inp.focus();
+}
+function closeSearch() { const d = $('#searchBox'); if (d) d.remove(); }
+document.addEventListener('keydown', e => {
+  if (GM.open) return; const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '');
+  if ((e.key === '/' && !typing && !e.metaKey && !e.ctrlKey) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) { if (S.me) { e.preventDefault(); openSearch(); } }
+  else if (e.key === 'Escape' && $('#searchBox')) closeSearch();
+});
+
+/* ============================================================ day sheet */
+const DAYOF = [['onsite_contact', 'On-site contact'], ['parking', 'Parking & load-in'], ['stage_power', 'Stage & power'], ['dress_code', 'Dress code'], ['food_notes', 'Food & drink'], ['gear_notes', 'Gear — who brings what']];
+function dayOfPanel(g) {
+  if (g.kind === 'practice' || !DAYOF.some(([k]) => g[k]) && !g.onsite_phone) return '';
+  const row = ([k, l]) => g[k] ? `<div><div class="eyebrow">${l}</div><div style="white-space:pre-wrap;margin-top:2px">${k === 'onsite_contact' && g.onsite_phone ? `${esc(g.onsite_contact)} · <a href="tel:${esc(g.onsite_phone)}">${esc(g.onsite_phone)}</a>` : esc(g[k])}</div></div>` : (k === 'onsite_contact' && g.onsite_phone ? `<div><div class="eyebrow">${l}</div><a href="tel:${esc(g.onsite_phone)}">${esc(g.onsite_phone)}</a></div>` : '');
+  return `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Day-of details</h2><span class="spacer"></span><a class="btn sm" href="#daysheet/${g.id}">Open day sheet</a></div><div class="stack" style="margin-top:12px;gap:12px">${DAYOF.map(row).join('')}</div></section>`;
+}
+function daySheetData(g) {
+  const L = listOf(g.id), items = L ? itemsOf(L.id).filter(i => i.played) : [], c = clientOf(g) || {};
+  const sets = [...new Set(items.map(i => i.set_no))].sort((a, b) => a - b).map(n => ({ n, songs: items.filter(i => i.set_no === n).map(i => { const s = byId('songs', i.song_id) || {}; return { title: s.title || '(deleted song)', key: s.song_key, capo: s.capo, bpm: s.bpm, starter: s.starter, note: i.note }; }) }));
+  const show = timeRange(g.start_time, g.end_time).replace(/&amp;/g, '&');
+  return {
+    title: g.title, date: g.gig_date ? longDate(g.gig_date) : 'Date TBD', facts: [['Load-in', g.load_in_time], ['Sound check', g.soundcheck_time], ['Show', show ? show + durText(g) : '']].filter(f => f[1]),
+    venue: g.venue || '', address: g.address || '', contact: [g.onsite_contact, g.onsite_phone].filter(Boolean).join(' · '), client: [c.contact_name, c.phone].filter(Boolean).join(' · '),
+    blocks: [['Parking & load-in', g.parking], ['Stage & power', g.stage_power], ['Dress code', g.dress_code], ['Food & drink', g.food_notes], ['Gear — who brings what', g.gear_notes], ['Notes', g.notes]].filter(b => b[1]),
+    lineup: activeMembers().map(m => ({ name: m.name, instrument: m.instrument || '' })), sets,
+  };
+}
+const songBits = s => [s.key ? 'Key ' + s.key + (s.capo ? ' (capo ' + s.capo + ')' : '') : '', s.bpm ? s.bpm + ' BPM' : '', s.starter ? 'starts: ' + s.starter : ''].filter(Boolean).join(' · ');
+function daySheetText(g) {
+  const d = daySheetData(g), L = [];
+  L.push('TRAILER FOLK — DAY SHEET', d.title, d.date, d.facts.map(([k, v]) => `${k} ${v}`).join(' · '), '');
+  if (d.venue || d.address) L.push(`Venue: ${[d.venue, d.address].filter(Boolean).join(' — ')}`);
+  if (d.contact) L.push(`On-site: ${d.contact}`); if (d.client) L.push(`Client: ${d.client}`);
+  d.blocks.forEach(([k, v]) => L.push('', k.toUpperCase(), v));
+  if (d.sets.length) { L.push('', 'SETLIST'); d.sets.forEach(s => { L.push(`Set ${s.n}`); s.songs.forEach((x, i) => { L.push(`${i + 1}. ${x.title}${songBits(x) ? ' — ' + songBits(x) : ''}`); if (x.note) L.push(`   » ${x.note}`); }); }); }
+  if (d.lineup.length) L.push('', 'BAND: ' + d.lineup.map(m => m.name + (m.instrument ? ` (${m.instrument})` : '')).join(', '));
+  return L.filter(x => x !== undefined).join('\n').replace(/\n{3,}/g, '\n\n');
+}
+function daySheetView(id) {
+  const g = byId('gigs', id);
+  if (!g) return `${title('Not found')}<p class="muted">That gig may have been deleted. <a href="#gigs">Back to gigs</a></p>`;
+  const d = daySheetData(g), map = g.address || g.venue ? 'https://maps.apple.com/?q=' + encodeURIComponent([g.venue, g.address].filter(Boolean).join(', ')) : '';
+  const ph = photosOf(g);
+  return `<div class="row noprint" style="margin-bottom:12px"><a href="#gig/${g.id}" class="back">← ${esc(g.title)}</a><span class="spacer"></span><button class="btn" data-act="ds-copy">Copy as text</button><button class="btn" data-act="ds-pdf">Save PDF</button><button class="btn gold" data-act="ds-print">Print</button></div>
+  <article class="ds">
+    <div class="ds-head"><div class="eyebrow">Day sheet</div><h1 class="disp" style="margin:4px 0 2px">${esc(d.title)}</h1><div class="ds-date">${esc(d.date)}</div></div>
+    ${d.facts.length ? `<div class="kv ds-facts">${d.facts.map(([k, v]) => `<div><div class="eyebrow">${k}</div><div class="v num">${esc(v)}</div></div>`).join('')}</div>` : ''}
+    <div class="ds-grid">
+      ${d.venue || d.address ? `<section><div class="eyebrow">Venue</div><div><b>${esc(d.venue || '')}</b></div>${d.address ? `<div>${map ? `<a href="${map}" target="_blank" rel="noopener">${esc(d.address)}</a>` : esc(d.address)}</div>` : ''}</section>` : ''}
+      ${d.contact ? `<section><div class="eyebrow">On-site contact</div><div>${g.onsite_phone ? `${esc(g.onsite_contact || '')} <a href="tel:${esc(g.onsite_phone)}">${esc(g.onsite_phone)}</a>` : esc(d.contact)}</div></section>` : ''}
+      ${d.client ? `<section><div class="eyebrow">Client</div><div>${esc(d.client)}</div></section>` : ''}
+      ${d.blocks.map(([k, v]) => `<section><div class="eyebrow">${esc(k)}</div><div style="white-space:pre-wrap">${esc(v)}</div></section>`).join('')}
+    </div>
+    ${ph.length ? `<div class="photos ds-photos">${ph.map(p => `<div class="ph"><img data-ph="${esc(p.path)}" data-act="photo-open" alt="Gig photo"></div>`).join('')}</div>` : ''}
+    <section class="ds-sets"><div class="eyebrow">Setlist</div>${d.sets.length ? d.sets.map(s => `<div class="ds-set"><b>Set ${s.n}</b><ol>${s.songs.map(x => `<li><span class="nm">${esc(x.title)}</span> <span class="small muted">${esc(songBits(x))}</span>${x.note ? `<div class="small" style="font-style:italic">» ${esc(x.note)}</div>` : ''}</li>`).join('')}</ol></div>`).join('') : '<div class="muted">No setlist yet.</div>'}</section>
+    ${d.lineup.length ? `<section class="ds-band"><div class="eyebrow">Band</div><div>${d.lineup.map(m => `<span>${esc(m.name)}${m.instrument ? ' <span class="small muted">(' + esc(m.instrument) + ')</span>' : ''}</span>`).join(' · ')}</div></section>` : ''}
+  </article>`;
+}
+async function daySheetPdf(g) {
+  const { jsPDF } = window.jspdf, d = daySheetData(g), doc = new jsPDF({ unit: 'pt', format: 'letter' }), W = 612, M = 48, maxW = W - 2 * M; let y = 0;
+  const need = h => { if (y + h > 744) { doc.addPage(); y = M; } };
+  doc.setFillColor(20, 14, 2); doc.rect(0, 0, W, 92, 'F'); doc.setTextColor(255, 191, 67); doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text('TRAILER FOLK · DAY SHEET', M, 30);
+  doc.setFontSize(26); doc.text(doc.splitTextToSize(d.title, maxW)[0], M, 62); doc.setFont('helvetica', 'normal'); doc.setFontSize(12); doc.setTextColor(243, 238, 228); doc.text(d.date, M, 82); y = 118;
+  if (d.facts.length) { doc.setTextColor(10, 8, 2); const colW = maxW / d.facts.length; d.facts.forEach(([k, v], i) => { doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(120, 105, 70); doc.text(k.toUpperCase(), M + i * colW, y); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(10, 8, 2); doc.text(doc.splitTextToSize(v, colW - 8)[0], M + i * colW, y + 18); }); y += 44; }
+  const block = (label, text) => { const lines = doc.splitTextToSize(String(text), maxW); need(18 + lines.length * 14 + 10); doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(120, 105, 70); doc.text(label.toUpperCase(), M, y); y += 14; doc.setFont('helvetica', 'normal'); doc.setFontSize(11.5); doc.setTextColor(10, 8, 2); doc.text(lines, M, y); y += lines.length * 14 + 12; };
+  if (d.venue || d.address) block('Venue', [d.venue, d.address].filter(Boolean).join('\n')); if (d.contact) block('On-site contact', d.contact); if (d.client) block('Client', d.client);
+  d.blocks.forEach(([k, v]) => block(k, v));
+  if (d.sets.length) { need(40); doc.setDrawColor(200, 190, 160); doc.line(M, y, W - M, y); y += 22; doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(10, 8, 2); doc.text('Setlist', M, y); y += 20;
+    d.sets.forEach(s => { need(34 + s.songs.reduce((a, x) => a + (x.note ? 30 : 16), 0)); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(150, 105, 10); doc.text(`SET ${s.n}`, M, y); y += 16;
+      s.songs.forEach((x, i) => { need(x.note ? 32 : 18); doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(140, 130, 110); doc.text(String(i + 1), M + 16, y, { align: 'right' }); doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(10, 8, 2); doc.text(x.title, M + 24, y); doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(90, 80, 60); doc.text(songBits(x), W - M, y, { align: 'right' }); y += 16; if (x.note) { doc.setFont('helvetica', 'italic'); doc.setFontSize(9.5); doc.setTextColor(120, 96, 30); doc.text('» ' + x.note, M + 24, y - 2, { maxWidth: maxW - 24 }); y += 14; } });
+      y += 8; }); }
+  if (d.lineup.length) block('Band', d.lineup.map(m => m.name + (m.instrument ? ` (${m.instrument})` : '')).join('  ·  '));
+  download(`Day sheet - ${g.title}${g.gig_date ? ' - ' + g.gig_date : ''}.pdf`, doc.output('blob'));
+}
 const isNA = (g, k) => Array.isArray(g.checklist_na) && g.checklist_na.includes(k);
 const CHECKS = [['deposit_received', 'Deposit received'], ['paperwork_signed', 'Paperwork signed'], ['invoice_sent', 'Invoice sent'], ['paid_in_full', 'Paid in full'], ['details_sent', 'Gig details sent to client']];
 function checklistPanel(g) {
@@ -526,14 +752,16 @@ function gigRead(g) {
   const stepper = practice || !mgr ? '' : `<div class="chips" style="margin-bottom:14px">${STATUS_PICK.map(([s, l, grp]) => `<button class="chip ${grp.includes(g.status) ? 'on' : ''}" data-act="set-status" data-v="${s}">${l}</button>`).join('')}</div>`;
   const facts = practice
     ? [kv('Date', esc(fmtDate(g.gig_date))), kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd), kv('Where', g.venue ? esc(g.venue) : tbd)]
-    : [kv('Date', esc(fmtDate(g.gig_date))), kv('Load-in', g.load_in_time ? esc(g.load_in_time) : tbd), kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd),
+    : [kv('Date', esc(fmtDate(g.gig_date))), kv('Load-in', g.load_in_time ? esc(g.load_in_time) : tbd), g.soundcheck_time ? kv('Sound check', esc(g.soundcheck_time)) : '', kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd),
        kv('Venue', g.venue ? esc(g.venue) : tbd), g.address ? kv('Address', `<a href="${mapUrl}" target="_blank" rel="noopener">${esc(g.address)}</a>`) : ''];
   const setlistPanel = practice ? '' : `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Setlist</h2><span class="spacer"></span>${L ? `<a class="btn sm gold" href="#setlist/${L.id}">Open setlist</a>` : (mgr ? `<button class="btn sm gold" data-act="sl-new" data-gig="${g.id}">New setlist</button>` : '')}</div>
       <div style="margin-top:12px">${L ? setlistSets(L, true) : `<p class="muted" style="margin:0">${g.songs_played_legacy ? g.songs_played_legacy + ' songs played (count from the old sheet).' : 'No setlist yet.'}</p>`}</div></section>`;
   const left = `<section class="panel"><h2 class="sec">Details</h2><div class="kv">${facts.join('')}</div></section>
     ${g.notes ? `<section class="panel"><h2 class="sec">${practice ? 'Plan' : 'Notes'}</h2><p style="margin:0;white-space:pre-wrap">${esc(g.notes)}</p></section>` : ''}
+    ${dayOfPanel(g)}
     ${photosPanel(g, false)}
-    ${setlistPanel}`;
+    ${setlistPanel}
+    ${activityFor('gigs', g.id).length ? `<section class="panel"><h2 class="sec">History</h2><div class="list">${activityFor('gigs', g.id).map(a => `<div class="li" style="align-items:flex-start"><div class="grow"><div><b>${esc(a.who || 'Someone')}</b> ${({ created: 'added this', updated: 'edited', restored: 'restored this' })[a.action] || a.action}</div>${(a.changes || []).map(c => `<div class="small muted">${esc(c.f)}: ${esc(c.from)} → ${esc(c.to)}</div>`).join('')}</div><span class="small faint" style="white-space:nowrap">${agoText(a.at)}</span></div>`).join('')}</div></section>` : ''}`;
   const money_rows = [['Quote', g.quote != null ? money(g.quote) : ''], ['Deposit', n0(g.deposit_amount) ? money(g.deposit_amount) + (g.deposit_received ? ' · received' : ' · owed') : ''], ['Paid (less deposit)', g.paid != null ? money(g.paid) : ''], ['Tips', n0(g.tips) ? money(g.tips) : ''], ['Merch', merchOf(g) ? money(merchOf(g)) : '']].filter(r => r[1]);
   const right = practice || !mgr ? '' : `
     ${checklistPanel(g)}
@@ -551,7 +779,7 @@ function gigRead(g) {
   return `
   <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a></div>
   ${gigHead(g)}
-  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${!practice && L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button>' : ''}<button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
+  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${practice ? '' : `<a class="btn" href="#daysheet/${g.id}">Day sheet</a>`}${!practice && L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button>' : ''}<button class="btn" data-act="ics-one">Add to calendar</button><button class="btn gold" data-act="gig-edit">Edit</button></div>
   ${stepper}
   ${right ? `<div class="split"><div class="stack">${left}</div><div class="stack">${right}</div></div>` : `<div class="stack" style="max-width:820px">${left}</div>`}`;
 }
@@ -579,6 +807,18 @@ function gigEdit(g) {
         <label class="f w4">${practice ? 'Plan' : 'Notes'}<textarea class="in" data-f="notes">${esc(g.notes || '')}</textarea></label>
       </div>
     </div></details>
+    ${practice ? '' : `<details class="panel fold" data-fold="dayof" ${foldOpen('dayof')}><summary><h2 class="sec">Day-of details</h2><span class="sum">${esc([g.onsite_contact, g.soundcheck_time && 'Sound check ' + g.soundcheck_time].filter(Boolean).join(' · ') || 'For the day sheet')}</span><span class="chev" aria-hidden="true">▾</span></summary><div class="fold-body">
+      <div class="fgrid">
+        ${f('soundcheck_time', 'Sound check', 'text', '', 'placeholder="5:30pm"')}
+        ${f('onsite_contact', 'On-site contact', 'text', 'w2')}
+        ${f('onsite_phone', 'On-site phone', 'tel')}
+        ${f('parking', 'Parking & load-in route', 'text', 'w4')}
+        ${f('stage_power', 'Stage size & power', 'text', 'w2')}
+        ${f('dress_code', 'Dress code', 'text', 'w2')}
+        ${f('food_notes', 'Food & drink', 'text', 'w4')}
+        <label class="f w4">Gear — who brings what<textarea class="in" data-f="gear_notes" placeholder="PA &amp; lights: Tyler&#10;Drums: Preston&#10;Extension cords: Aaron">${esc(g.gear_notes || '')}</textarea></label>
+      </div>
+    </div></details>`}
     ${practice ? '' : checklistPanel(g)}
     ${photosPanel(g, true)}
     ${practice ? '' : `
@@ -634,7 +874,7 @@ function gigEdit(g) {
    </div>
   </div>`;
 }
-const FOLD_DEFAULT = { details: true, setlist: true, client: false, money: false, paper: false, cal: false, payout: false };
+const FOLD_DEFAULT = { dayof: false, details: true, setlist: true, client: false, money: false, paper: false, cal: false, payout: false };
 const foldOpen = k => ((UI.folds || {})[k] ?? FOLD_DEFAULT[k]) ? 'open' : '';
 document.addEventListener('toggle', e => { const d = e.target; if (!d.matches || !d.matches('details[data-fold]')) return; UI.folds = { ...(UI.folds || {}), [d.dataset.fold]: d.open }; keepUI(); }, true);
 function lineItem(g, plain) {
@@ -1350,6 +1590,10 @@ function prefsView() {
   return `${title('Prefs')}
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
+    ${(() => { if (!S.me) return ''; const st = settings(), off = Array.isArray(st.digest_optout) && st.digest_optout.includes(S.me.id);
+      return `<div class="f" style="margin-top:14px;max-width:520px"><span>Weekly digest email</span>
+      <label class="check" style="align-items:flex-start"><input type="checkbox" data-digest-on ${off ? '' : 'checked'}><span>Email me the Monday digest<div class="small muted">This week’s gigs and practices, what needs attention, and (for managers) money owed. Sent to ${esc(S.me.email || 'the email on your roster entry — add it under Admin → Roster')}.</div></span></label>
+      <div class="row" style="margin-top:6px"><button class="btn sm" data-act="digest-preview">Preview</button><button class="btn sm" data-act="digest-test">Send me a test now</button></div></div>`; })()}
     <div class="small faint" style="margin-top:14px">App version ${APP_V} · <a href="#" data-act="app-refresh">Update app files now</a></div>
     <label class="f" style="margin-top:14px;max-width:320px">Header position (iPad)<select class="in" data-hdr>${[[10, 'Snug'], [32, 'Medium'], [56, 'Low'], [80, 'Lowest']].map(([v, l]) => `<option value="${v}" ${(UI.hdr != null ? UI.hdr : 56) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:14px;max-width:320px">Footer position (iPad)<select class="in" data-ftr>${[[0, 'Lowest'], [6, 'Low'], [14, 'Medium'], [24, 'High'], [34, 'Highest']].map(([v, l]) => `<option value="${v}" ${(UI.fpx != null ? UI.fpx : 14) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -1367,6 +1611,26 @@ function prefsView() {
       <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
   </section>`;
+}
+function trashPanel() {
+  const rows = TRASHABLE.flatMap(t => S._trash[t].map(r => ({ t, r }))).sort((a, b) => (b.r.deleted_at || '').localeCompare(a.r.deleted_at || ''));
+  const by = (t, r) => { const a = S.activity.find(x => x.action === 'deleted' && x.entity === t && x.entity_id === r.id); return a ? ' by ' + esc(a.who || 'someone') : ''; };
+  return `<section class="panel" style="grid-column:1/-1"><div class="row"><h2 class="sec" style="margin:0">Trash</h2><span class="small muted">${rows.length} item${rows.length === 1 ? '' : 's'}</span><span class="spacer"></span>${rows.length ? '<button class="btn sm danger" data-act="trash-empty">Empty trash</button>' : ''}</div>
+    ${S._trashReady ? '<p class="small muted" style="margin:6px 0 0">Deleted gigs, songs, setlists, clients and expenses wait here until you delete them forever.</p>' : '<p class="small" style="color:var(--gold);margin:6px 0 0">Trash &amp; Undo need the latest SQL update (15). Until it’s run, deletes are permanent.</p>'}
+    <div class="list" style="margin-top:8px">${rows.map(({ t, r }) => `<div class="li"><span class="pill" style="color:var(--muted)">${TRASH_LABEL[t]}</span><div class="grow"><div class="t">${esc(trashName(t, r))}</div><div class="s">Deleted ${agoText(r.deleted_at)}${by(t, r)}</div></div><button class="btn sm" data-act="trash-restore" data-t="${t}" data-id="${r.id}">Restore</button><button class="btn sm danger" data-act="trash-purge" data-t="${t}" data-id="${r.id}">Delete forever</button></div>`).join('') || '<div class="empty">Trash is empty.</div>'}</div></section>`;
+}
+function activityPanel() {
+  const f = UI.actFilter || 'all', more = UI.actMore || 40, FILTERS = [['all', 'Everything'], ['gigs', 'Gigs'], ['songs', 'Songs'], ['setlists', 'Setlists'], ['clients', 'Clients'], ['expenses', 'Money']];
+  const all = S.activity.filter(a => f === 'all' || a.entity === f), rows = all.slice(0, more);
+  const verb = { created: 'added', updated: 'edited', deleted: 'deleted', restored: 'restored', purged: 'deleted forever' };
+  const link = a => { const t = esc(a.title || a.entity); if (a.action === 'deleted' || a.action === 'purged') return `<b>${t}</b>`; if (a.entity === 'gigs') return `<a href="#gig/${a.entity_id}">${t}</a>`; if (a.entity === 'setlists') return `<a href="#setlist/${a.entity_id}">${t}</a>`; if (a.entity === 'songs') return `<a href="#" data-act="song-edit" data-id="${a.entity_id}">${t}</a>`; return `<b>${t}</b>`; };
+  let day = '';
+  return `<section class="panel" style="grid-column:1/-1"><div class="row"><h2 class="sec" style="margin:0">Activity</h2><span class="small muted">who changed what</span></div>
+    ${S._actReady ? '' : '<p class="small" style="color:var(--gold);margin:6px 0 0">The activity log needs the latest SQL update (15).</p>'}
+    <div class="chips" style="margin:10px 0">${FILTERS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-act="act-filter" data-v="${k}">${l}</button>`).join('')}</div>
+    <div class="list">${rows.map(a => { const d = String(a.at).slice(0, 10), head = d !== day ? `<div class="eyebrow" style="padding:10px 0 2px">${d === todayIso() ? 'Today' : fmtDate(d)}</div>` : ''; day = d;
+      return `${head}<div class="li" style="align-items:flex-start"><div class="grow"><div><b>${esc(a.who || 'Someone')}</b> ${verb[a.action] || a.action} ${link(a)}</div>${(a.changes || []).map(c => `<div class="small muted">${esc(c.f)}: ${esc(c.from)} → ${esc(c.to)}</div>`).join('')}</div><span class="small faint" style="white-space:nowrap">${agoText(a.at)}</span></div>`; }).join('') || '<div class="empty">Nothing logged yet — changes from now on show up here.</div>'}</div>
+    ${all.length > more ? `<div class="row" style="margin-top:10px"><button class="btn sm" data-act="act-more">Show more</button></div>` : ''}</section>`;
 }
 function adminView() {
   const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
@@ -1411,6 +1675,8 @@ function adminView() {
       </tbody></table>
       <div class="row" style="margin-top:12px"><button class="btn gold sm" data-act="save-members">Save roster</button></div>
     </section>` : ''}
+    ${trashPanel()}
+    ${activityPanel()}
   </div>`;
 }
 
@@ -2061,6 +2327,9 @@ document.addEventListener('change', async e => {
     UI.media = t.checked; keepUI(); toast(t.checked ? 'Gig mode will listen for music-control buttons' : 'Music-control mode off');
   } else if (t.matches('[data-ftr]')) {
     UI.fpx = Number(t.value); keepUI(); render();
+  } else if (t.matches('[data-digest-on]')) {
+    if (!S.me) return; const st = settings(), cur = Array.isArray(st.digest_optout) ? st.digest_optout : [], next = t.checked ? cur.filter(x => x !== S.me.id) : [...new Set([...cur, S.me.id])];
+    if (await guard(() => save('settings', { ...st, digest_optout: next }), t.checked ? 'You’ll get the Monday digest' : 'Digest turned off for you')) render(); else t.checked = !t.checked;
   } else if (t.matches('[data-hdr]')) {
     UI.hdr = Number(t.value); keepUI(); render();
   } else if (t.matches('[data-song-stars]')) {
@@ -2090,7 +2359,7 @@ document.addEventListener('click', async e => {
   const act = el.dataset.act, v = el.dataset.v, id = el.dataset.id;
   const route = (location.hash || '#home').slice(1).split('/');
   const L = route[0] === 'setlist' ? byId('setlists', route[1]) : null;
-  const g = route[0] === 'gig' ? byId('gigs', route[1]) : L ? slCtx(L) : null;        // on a setlist page, g is the setlist with gig details filled in
+  const g = route[0] === 'gig' || route[0] === 'daysheet' ? byId('gigs', route[1]) : L ? slCtx(L) : null;        // on a setlist page, g is the setlist with gig details filled in
   if (el.tagName === 'A' && el.getAttribute('href') === '#') e.preventDefault();
   if (act === 'rate' || el.closest('.stars')) e.stopPropagation();
   const H = ACTIONS[act]; if (H) await H({ el, v, id, g, e });
@@ -2119,10 +2388,10 @@ const ACTIONS = {
   },
   'set-status': async ({ v, g }) => { if (!g) return; const patch = collectGig(g); patch.status = v; if (v === 'complete' && patch.paid == null && !patch.deposit_received && n0(patch.quote)) toast('Marked played — log what was paid below.'); await guard(() => save('gigs', patch), 'Status: ' + STATUS_LABEL[v]); S.dirty = false; render(); },
   'save-gig': async ({ g }) => { if (!g) return; await saveGigForm(g); },
-  'del-gig-ask': ({ el }) => { el.parentElement.innerHTML = `<span class="confirm">Delete this ${byId('gigs', (location.hash.split('/')[1]))?.kind === 'practice' ? 'practice' : 'gig'} and its setlist? <button class="btn danger sm" data-act="del-gig">Yes, delete</button><button class="btn sm" data-act="cancel-del">Keep</button></span>`; },
+  'del-gig-ask': ctx => { if (S._trashReady) return ACTIONS['del-gig'](ctx); const el = ctx.el; el.parentElement.innerHTML = `<span class="confirm">Delete this ${byId('gigs', (location.hash.split('/')[1]))?.kind === 'practice' ? 'practice' : 'gig'} and its setlist for good? <button class="btn danger sm" data-act="del-gig">Yes, delete</button><button class="btn sm" data-act="cancel-del">Keep</button></span>`; },
   'cancel-del': () => render(),
   'fold-all': ({ v }) => { $$('details[data-fold]').forEach(d => d.open = v === '1'); },
-  'del-gig': async ({ g }) => { if (!g) return; await guard(() => del('gigs', g.id), 'Deleted'); S.setlists.forEach(l => { if (l.gig_id === g.id) l.gig_id = null; }); S.dirty = false; location.hash = '#gigs'; },
+  'del-gig': async ({ g }) => { if (!g) return; const label = g.kind === 'practice' ? 'Practice' : g.title; S.dirty = false; S.editGig = null; if (await deleteWithUndo('gigs', g.id, label)) location.hash = '#gigs'; else render(); },
   pdf: async ({ v, g }) => { if (!g) return; if (S.dirty) await saveGigForm(g, true); await pdfFor(byId('gigs', g.id), v); },
   mail: async ({ v, g }) => { if (!g) return; if (S.dirty) await saveGigForm(g, true); openModal(mailModal(byId('gigs', g.id), v)); },
   'copy-mail': () => copy($('#mailBody').textContent),
@@ -2180,10 +2449,23 @@ const ACTIONS = {
   'client-delete': async ({ id }) => {
     const c = byId('clients', id); if (!c) return;
     if (S.gigs.some(g => g.client_id === id)) return toast('Remove this client from its gigs first.', true);
-    if (!confirm(`Delete ${c.org || c.contact_name}?`)) return;
-    if (await guard(() => del('clients', id), 'Client deleted')) { closeModal(); render(); }
+    closeModal(); await deleteWithUndo('clients', id, c.org || c.contact_name || 'Client'); render();
   },
+  'trash-restore': async ({ el }) => { const t = el.dataset.t; if (await guard(() => restoreItem(t, el.dataset.id), 'Restored')) render(); },
+  'trash-purge': async ({ el }) => { const t = el.dataset.t, r = S._trash[t].find(x => x.id === el.dataset.id); if (!r || !confirm(`Delete “${trashName(t, r)}” forever? This can’t be undone.`)) return; if (await guard(() => purgeItem(t, el.dataset.id), 'Deleted forever')) render(); },
+  'trash-empty': async () => { const n = TRASHABLE.reduce((a, t) => a + S._trash[t].length, 0); if (!n || !confirm(`Delete all ${n} item${n === 1 ? '' : 's'} in the Trash forever? This can’t be undone.`)) return; await guard(async () => { for (const t of TRASHABLE) for (const r of [...S._trash[t]]) await purgeItem(t, r.id); }, 'Trash emptied'); render(); },
+  'act-filter': ({ v }) => { UI.actFilter = v; UI.actMore = 40; keepUI(); render(); },
+  'act-more': () => { UI.actMore = (UI.actMore || 40) + 60; keepUI(); render(); },
+  'digest-preview': async () => {
+    const r = await digestCall('preview=1&as=' + S.me.id); if (!r) return;
+    openModal(`<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(680px,100%)"><div class="row"><h2 class="sec" style="margin:0">Digest preview</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div><p class="small muted" style="margin:8px 0">${esc(r.subject)}</p><iframe sandbox="" style="width:100%;height:62vh;border:1px solid var(--line);border-radius:10px;background:#fff" srcdoc="${r.html.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></iframe></div></div>`);
+  },
+  'digest-test': async () => { if (!S.me.email) return toast('Add your email under Admin → Roster first.', true); const r = await digestCall('test=' + encodeURIComponent(S.me.email)); if (r) toast(r.failed && r.failed.length ? 'Failed: ' + r.failed[0] : `Test digest sent to ${(r.sent || [])[0] || S.me.email}`, !!(r.failed && r.failed.length)); },
+  'search-open': () => openSearch(),
   'who-menu': () => { const m = $('#whoMenu'); if (m) m.hidden = !m.hidden; },
+  'ds-print': () => window.print(),
+  'ds-copy': ({ g }) => g && copy(daySheetText(g)),
+  'ds-pdf': async ({ g }) => { if (!g) return; if (!window.jspdf) return toast('The PDF tool didn’t load.', true); await guard(() => daySheetPdf(g)); },
   'gig-na': async ({ el, g }) => {
     if (!g) return; const k = el.dataset.k, cur = new Set(Array.isArray(g.checklist_na) ? g.checklist_na : []); cur.has(k) ? cur.delete(k) : cur.add(k);
     if (!(await guard(() => save('gigs', { ...g, checklist_na: [...cur] })))) return;
@@ -2206,7 +2488,7 @@ const ACTIONS = {
   // setlists
   'sel-set': ({ v, e }) => { if (e.target.closest('button')) return; UI.selSet = Number(v); render(); },
   'lib-add': async ({ id, g }) => { if (!g) return; const its = itemsOf(g.id).filter(i => i.set_no === UI.selSet); await guard(() => save('setlist_items', { id: uuid(), setlist_id: g.id, set_no: UI.selSet, position: (its.length ? Math.max(...its.map(i => i.position)) : 0) + 1, song_id: id, played: true, pinned: false })); render(); },
-  'si-del': async ({ id }) => { await guard(() => del('setlist_items', id)); render(); },
+  'si-del': async ({ id }) => { const it = S.setlist_items.find(i => i.id === id); await guard(() => del('setlist_items', id)); render(); if (it) toastUndo('Song removed from the set', async () => { await save('setlist_items', it); render(); }); },
   'si-played': async ({ id }) => { const i = byId('setlist_items', id); await guard(() => save('setlist_items', { ...i, played: !i.played })); render(); },
   'si-move': async ({ id, v }) => {
     const i = byId('setlist_items', id); const its = itemsOf(i.setlist_id).filter(x => x.set_no === i.set_no); const k = its.findIndex(x => x.id === id); const j = k + Number(v);
@@ -2272,8 +2554,8 @@ const ACTIONS = {
     const r = await guard(async () => { const c = await save('setlists', { ...L, id: copyId, gig_id: null, name: `${slName(L)} (copy)`, created_at: undefined, updated_at: undefined }); await saveMany('setlist_items', itemsOf(L.id).map(i => ({ ...i, id: uuid(), setlist_id: copyId, created_at: undefined, updated_at: undefined }))); return c; }, 'Copied as a draft');
     if (r) { S.editSl = copyId; location.hash = '#setlist/' + copyId; }
   },
-  'sl-del-ask': ({ el }) => { el.parentElement.innerHTML = `<span class="confirm">Delete this setlist and its songs? <button class="btn danger sm" data-act="sl-del">Delete</button><button class="btn sm" data-act="cancel-del">Keep</button></span>`; },
-  'sl-del': async ({ g }) => { const id = g.id; if (await guard(() => del('setlists', id), 'Setlist deleted')) {} S.setlist_items = S.setlist_items.filter(i => i.setlist_id !== id); location.hash = '#setlists'; },
+  'sl-del-ask': ctx => { if (S._trashReady) return ACTIONS['sl-del'](ctx); const el = ctx.el; el.parentElement.innerHTML = `<span class="confirm">Delete this setlist and its songs for good? <button class="btn danger sm" data-act="sl-del">Delete</button><button class="btn sm" data-act="cancel-del">Keep</button></span>`; },
+  'sl-del': async ({ g }) => { const id = g.id, label = slName(g); S.editSl = null; if (await deleteWithUndo('setlists', id, label)) location.hash = '#setlists'; else render(); },
   // songs
   rate: async ({ id, v }) => { if (!S.me) return; const cur = myRating(id); const val = Number(v); if (cur === val) { await guard(() => api.remove('song_ratings', { song_id: id, member_id: S.me.id })); S.song_ratings = S.song_ratings.filter(r => !(r.song_id === id && r.member_id === S.me.id)); } else await guard(() => save('song_ratings', { song_id: id, member_id: S.me.id, rating: val })); render(); },
   'song-edit': ({ id, e }) => { if (e.target.closest('.stars')) return; openModal(songModal(byId('songs', id))); },
@@ -2287,13 +2569,13 @@ const ACTIONS = {
     if (!s.title) return toast('Give the song a title.', true);
     if (await guard(() => save('songs', s), 'Song saved')) { if (id) openModal(songModal(byId('songs', id))); else closeModal(); render(); }
   },
-  'song-del-ask': ({ el }) => { el.parentElement.innerHTML = `<span class="confirm">Delete from the book and every setlist? <button class="btn danger sm" data-act="song-del">Delete</button></span>`; },
-  'song-del': async () => { const id = $('[data-act="song-save"]').dataset.id; await guard(() => del('songs', id), 'Deleted'); S.setlist_items = S.setlist_items.filter(i => i.song_id !== id); closeModal(); render(); },
+  'song-del-ask': ctx => { if (S._trashReady) return ACTIONS['song-del'](ctx); const el = ctx.el; el.parentElement.innerHTML = `<span class="confirm">Delete from the book and every setlist? <button class="btn danger sm" data-act="song-del">Delete</button></span>`; },
+  'song-del': async () => { const id = $('[data-act="song-save"]').dataset.id, s = byId('songs', id); closeModal(); await deleteWithUndo('songs', id, s ? s.title : 'Song'); render(); },
   // money
   'exp-new': () => openModal(expenseModal({ paid_by: S.me && S.me.id })),
   'exp-edit': ({ id }) => openModal(expenseModal(byId('expenses', id))),
   'exp-save': async ({ id }) => { const x = id ? { ...byId('expenses', id) } : { id: uuid() }; readX(x); if (!n0(x.amount)) return toast('Enter an amount.', true); if (await guard(() => save('expenses', x), 'Expense saved')) { closeModal(); render(); } },
-  'exp-del': async ({ id }) => { await guard(() => del('expenses', id), 'Deleted'); closeModal(); render(); },
+  'exp-del': async ({ id }) => { closeModal(); await deleteWithUndo('expenses', id, 'Expense'); render(); },
   'merch-item-new': () => openModal(merchItemModal({})),
   'merch-item-edit': ({ id }) => openModal(merchItemModal(byId('merch_items', id))),
   'merch-item-save': async ({ id }) => { const x = id ? { ...byId('merch_items', id) } : { id: uuid() }; readX(x); if (!x.name) return toast('Name the item.', true); if (await guard(() => save('merch_items', x), 'Saved')) { closeModal(); render(); } },

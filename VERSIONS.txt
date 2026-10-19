@@ -1,31 +1,24 @@
-Trailer Folk HQ - latest full set (rev 39, index.html loads app.js?v=46)
+Trailer Folk HQ - latest full set (rev 40, index.html loads app.js?v=51)
 
 PUSH TO GITHUB (repo root, replacing the old copies):
-  index.html, app.js
-  sw.js                                NEW - offline mode (keeps the app's files on the iPad). Must sit next to index.html.
-  pdf.min.js, pdf.worker.min.js        the PDF viewer for gig mode (pdf.js 3.11.174, Apache-2.0; license in pdfjs-LICENSE.txt)
+  index.html, app.js, sw.js
+  pdf.min.js, pdf.worker.min.js        (PDF viewer for gig mode; pdf.js 3.11.174, Apache-2.0, license in pdfjs-LICENSE.txt)
 
 RUN IN SUPABASE (SQL Editor; each is safe to re-run; skip any you've already run):
-  supabase/05_view_edit_checklist.sql   load-in time + checklist
-  supabase/06_gig_photos.sql            gig photos
-  supabase/07_open_settings.sql         members can edit band settings
-  supabase/08_song_opener_closer.sql    good opener / closer flags
-  supabase/09_song_encore.sql           good encore flag
-  supabase/10_song_charts.sql           personal PDF charts (tables + private storage bucket)
-  supabase/11_song_bpm.sql              BPM on songs
-  (01-04 and 02_seed.sql are your originals; the seed has your data - don't commit it to a public repo)
-  supabase/14_checklist_na.sql          NEW - struck-through (N/A) checklist items
-  supabase/13_chart_marks.sql           NEW - Apple Pencil markup (private to each member). Run after 10.
-  supabase/12_catchup_columns.sql        - adds every column the app needs, then refreshes Supabase's schema cache. If you get
-                                        "Could not find the '...' column", run this one.
+  supabase/05 ... 14                    (earlier features)
+  supabase/15_trash_activity_daysheet.sql   NEW - Trash & Undo, Activity log, Day-sheet fields, digest opt-out
+  supabase/16_digest_cron.sql               NEW - schedules the Monday digest (run ONCE, after deploying band-digest; needs pg_cron + pg_net)
+  supabase/12_catchup_columns.sql           safety net: every column the app needs (now includes the 15 columns)
 
-REDEPLOY: supabase/functions/band-calendar/index.ts   (CHANGED in this release - redeploy it; JWT verification must be OFF)
+DEPLOY (Supabase Edge Functions, JWT verification OFF for both):
+  supabase/functions/band-calendar/index.ts   CHANGED - deleted gigs stay off the calendar
+  supabase/functions/band-digest/index.ts     NEW - weekly digest email. Secrets: RESEND_API_KEY + DIGEST_FROM, or GMAIL_USER + GMAIL_APP_PASSWORD
 
 NOT INCLUDED (keep your existing copies): CNAME, assets/, vendor/
 
 Checksums:
-1dd41024423ba2ae58c9879a652bf9bd  ./app.js
-4c2894c7e7ba7cfb8d4adcf3d4090dcb  ./index.html
+9949a03f0f7de41a59c225ace3539cae  ./app.js
+62f83c267c0f93304c3f4fe493b3cdae  ./index.html
 96de323330f8b8336f637a0051835e00  ./pdf.min.js
 a53a71a2a5d618ed0f86ebf099db032a  ./pdf.worker.min.js
 2ee41112a44fe7014dce33e26468ba93  ./pdfjs-LICENSE.txt
@@ -40,8 +33,11 @@ c78fe2515b1c4e986e0f1038d2c71fde  ./supabase/05_view_edit_checklist.sql
 6c36e77f63311370d51f9687c49ddd38  ./supabase/09_song_encore.sql
 5676b8eea6ee5a77a579355c0821d0d3  ./supabase/10_song_charts.sql
 07019cd84002c815d5d4e07aa3c5a5d9  ./supabase/11_song_bpm.sql
-c836d3ec0a3f2f42189a6e02adf1cb00  ./supabase/12_catchup_columns.sql
+7bd5f6837a33d067cf683718efc2020b  ./supabase/12_catchup_columns.sql
 f4a85ae468eb27fa9b0a40212cb37ef6  ./supabase/13_chart_marks.sql
 e80056b654f6ac0e441727569df992fc  ./supabase/14_checklist_na.sql
-3fc1c16da2f207f03dfa18ccc8d2e084  ./supabase/functions/band-calendar/index.ts
+14ef7bb08c4e383986a6f02162bca6cd  ./supabase/15_trash_activity_daysheet.sql
+451cafbeeceafee87cc58caa50983e3b  ./supabase/16_digest_cron.sql
+5e0f1a1f5ac7a7de803c8cfd835644fb  ./supabase/functions/band-calendar/index.ts
+b313492cc57bd5a98977294eaf69b485  ./supabase/functions/band-digest/index.ts
 ab8991726a19563ae673cc90ffab489d  ./sw.js
