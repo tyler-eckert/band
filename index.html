@@ -457,6 +457,10 @@ label.hp{position:absolute!important;left:-9999px;width:1px;height:1px;overflow:
 .fgrid .check{display:flex;align-items:center;gap:8px;font-size:14px;text-transform:none;letter-spacing:0;color:var(--cream);font-weight:400}
 .fgrid .check input{width:20px;height:20px;accent-color:var(--gold)}
 @media (max-width:620px){ .login .fm.wide .fgrid{grid-template-columns:minmax(0,1fr)} .login .fm.wide .fgrid .w2,.login .fm.wide .fgrid .w4{grid-column:1/-1} }
+.inq-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.inq-prev .login{min-height:0}
+.inq-prev .fgrid{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:620px){ .inq-prev .fgrid{grid-template-columns:minmax(0,1fr)} .inq-prev .fgrid .w2,.inq-prev .fgrid .w4{grid-column:1/-1} }
 </style>
 </head>
 <body>
@@ -464,6 +468,6 @@ label.hp{position:absolute!important;left:-9999px;width:1px;height:1px;overflow:
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=56"></script>
+<script src="app.js?v=58"></script>
 </body>
 </html>
