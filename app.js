@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 55;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 56;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -340,7 +340,7 @@ function attention() {
     if (['confirmed'].includes(g.status) && d && d >= t && days(t, d) <= (st.remind_setlist_days || 14) && !setItems(g.id).length) add(days(t, d) <= 5 ? 'hi' : 'md', g, `Gig in ${days(t, d)} days and no setlist yet.`, 'Build set');
     if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 21 && (!g.start_time || !g.venue || /tbd/i.test(g.venue || ''))) add('md', g, 'Missing start time or venue — lock in details with the client.', 'Details');
     if (g.status === 'confirmed' && !d) add('md', g, 'Booked but no date set.', 'Details');
-    if (g.status === 'inquiry' && !g.quote) { const age = g.created_at ? days(String(g.created_at).slice(0, 10), t) : 0; add(age >= 2 ? 'hi' : 'md', g, age >= 2 ? `Lead is ${age} days old with no quote — reply today.` : 'New lead — send a quote.', 'Quote'); }
+    if (g.status === 'inquiry' && !g.quote) { const age = g.created_at ? days(String(g.created_at).slice(0, 10), t) : 0, web = g.lead_source === 'website'; add(age >= (web ? 1 : 2) ? 'hi' : 'md', g, age >= (web ? 1 : 2) ? `${web ? 'Website inquiry' : 'Lead'} is ${age} day${age === 1 ? '' : 's'} old with no quote — reply today.` : (web ? 'New website inquiry — reply and send a quote.' : 'New lead — send a quote.'), 'Quote'); }
     if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 30 && !n0(g.quote)) add('md', g, 'Booked but no price recorded — add the quote so the invoice is right.', 'Quote');
     if (g.status === 'confirmed' && d && d >= t && days(t, d) <= 14) {                               // gig-readiness: what the band and the day sheet need
       const L = listOf(g.id), its = L ? itemsOf(L.id).filter(i => i.played) : [], c = clientOf(g);
@@ -415,7 +415,7 @@ const cbm = good => UI.cb ? (good ? '✓ ' : '▲ ') : '';
 /* ============================================================ router */
 let UI = { gigFilter: 'upcoming', gigSearch: '', gigYear: 'all', calMonth: null, songFilter: 'active', songSearch: '', songSort: 'title', moneyYear: String(new Date().getFullYear()), selSet: 1, libFilter: 'active', libSearch: '' };
 try { Object.assign(UI, JSON.parse(localStorage.getItem('tfhq-ui') || '{}')); } catch {}
-const keepUI = () => { try { localStorage.setItem('tfhq-ui', JSON.stringify(UI)); } catch {} };
+const keepUI = () => { try { const { pubShown, pubSent, ...keep } = UI; localStorage.setItem('tfhq-ui', JSON.stringify(keep)); } catch {} };   // the front-door form state is never saved
 
 function render() {
   document.body.classList.toggle('cb', !!UI.cb); document.body.classList.toggle('offline', !!S.offline);
@@ -423,6 +423,7 @@ function render() {
   document.body.style.setProperty('--tz', UI.tz != null ? UI.tz : (window.innerWidth >= 700 ? 1.12 : 1));
   const app = $('#app');
   if (!S.session) return app.innerHTML = loginView();
+  if (['login', 'contact'].includes((location.hash || '').slice(1))) history.replaceState(null, '', location.pathname);   // signed in: drop #login / #contact
   if (!S.loaded) return app.innerHTML = shell('home', '<p class="muted">Loading the band book…</p>');
   if (!S.me) return app.innerHTML = notMemberView();
   let route = (location.hash || '#home').slice(1);
@@ -442,19 +443,89 @@ window.addEventListener('hashchange', () => { if (S.dirty && !confirmLeave()) re
 function confirmLeave() { S.dirty = false; return true; }
 
 /* ============================================================ login */
+const INQ = {
+  events: ['Wedding or reception', 'Private party', 'Corporate event', 'Fundraiser or nonprofit', 'Festival or public event', 'Brewery or venue show', 'Other'],
+  hours: ['1', '1.5', '2', '2.5', '3', '4', 'Not sure yet'], yesno: ['Yes', 'No', 'Not sure'],
+  budgets: ['Under $1,500', '$1,500 - $2,000', '$2,000 - $2,500', '$2,500 - $3,500', '$3,500+', 'Not sure yet'],
+  guests: ['Under 50', '50 - 100', '100 - 250', '250 - 500', '500+', 'Not sure'], settings: ['Indoor', 'Outdoor', 'Both or not sure'],
+  heard: ['Referral from a friend', 'Saw you at an event', 'Instagram', 'YouTube', 'Google search', 'A venue recommended you', 'Other'], prefs: ['Email', 'Text', 'Call'],
+};
+const PRESS_KIT = 'Trailer-Folk-Press-Kit.pdf';
+const pubView = () => { const h = (location.hash || '').slice(1).split('/')[0]; return h === 'login' ? 'login' : h === 'contact' ? 'contact' : 'home'; };
+const BAND_EMAIL_PUB = 'TrailerFolkBand@gmail.com';
 function loginView() {
-  return `<div class="login">
-    <div class="ph" role="img" aria-label="Trailer Folk on stage"></div>
-    <form class="fm" id="loginForm">
-      <img src="assets/logo.png" alt="Trailer Folk">
-      ${title('Band HQ')}
+  const v = pubView(); if (v !== 'contact') UI.pubShown = null;
+  const back = '<a class="back pub-back" href="#">← Back</a>', social = '<div class="pub-social small muted">Follow along: <a href="https://instagram.com/trailer_folk" target="_blank" rel="noopener">@trailer_folk</a> · <a href="https://youtube.com/@TrailerFolk" target="_blank" rel="noopener">@TrailerFolk</a></div>';
+  const ph = '<div class="ph" role="img" aria-label="Trailer Folk on stage"></div>';
+  if (v === 'login') return `<div class="login">${ph}
+    <form class="fm" id="loginForm">${back}<img src="assets/logo.png" alt="Trailer Folk">${title('Band Login')}
       <div class="stack">
         <label class="f">Email<input class="in" id="lgEmail" type="email" autocomplete="username" required></label>
         <label class="f">Password<input class="in" id="lgPass" type="password" autocomplete="current-password"></label>
         <div class="row"><button class="btn gold" type="submit">Sign in</button></div>
         <p class="small" id="lgMsg" style="color:var(--bad);min-height:1.5em"></p>
-      </div>
-    </form></div>`;
+      </div></form></div>`;
+  if (v === 'contact') { if (!UI.pubShown) UI.pubShown = Date.now(); return `<div class="login">${ph}<div class="fm wide">${back}<img src="assets/logo.png" alt="Trailer Folk">${UI.pubSent ? thanksView() : contactView()}</div></div>`; }
+  return `<div class="login">${ph}
+    <div class="fm pub"><img src="assets/logo.png" alt="Trailer Folk">
+      <h1 class="echo disp" style="margin:0 0 .35em"><span class="solid">Trailer Folk</span></h1>
+      <p class="pub-tag">Folk grit meets country gold.</p>
+      <p class="muted" style="margin:0 0 22px;max-width:420px">A five-piece American folk cover band from Oklahoma. Fiddle, banjo and big harmonies for weddings, parties, festivals and everything in between.</p>
+      <div class="pub-btns">
+        <a class="btn big" href="#login">Band Login</a>
+        <a class="btn big" href="${PRESS_KIT}" target="_blank" rel="noopener">Press Kit</a>
+        <a class="btn big gold" href="#contact">Contact Us</a>
+      </div>${social}</div></div>`;
+}
+function contactView() {
+  const sel = (id, label, list, req, cls = '') => `<label class="f ${cls}">${label}${req ? ' *' : ''}<select class="in" id="${id}" ${req ? 'required' : ''}><option value="">Select…</option>${list.map(x => `<option>${esc(x)}</option>`).join('')}</select></label>`;
+  return `${title('Book Trailer Folk')}
+    <p class="muted" style="margin:-10px 0 18px;max-width:560px">Tell us about your event and we’ll reply with availability and a quote, usually within two business days. Prefer email? <a href="mailto:${BAND_EMAIL_PUB}">${BAND_EMAIL_PUB}</a></p>
+    <form id="contactForm" novalidate><div class="fgrid">
+      <label class="f w2">Your name *<input class="in" id="ctName" autocomplete="name" required></label>
+      ${sel('ctPref', 'Best way to reach you', INQ.prefs, false, 'w2')}
+      <label class="f w2">Email<input class="in" id="ctEmail" type="email" inputmode="email" autocomplete="email"></label>
+      <label class="f w2">Phone<input class="in" id="ctPhone" type="tel" inputmode="tel" autocomplete="tel"></label>
+      <p class="small muted w4" style="margin:-4px 0 0">Add at least one: an email or a phone number.</p>
+      ${sel('ctEvent', 'Type of event', INQ.events, true, 'w2')}
+      <label class="f w2">Event date *<input class="in" id="ctDate" type="date" required></label>
+      <label class="check w2" style="align-self:end"><input type="checkbox" id="ctNoDate"><span>I don’t have a date yet</span></label>
+      <label class="check w2" style="align-self:end"><input type="checkbox" id="ctFlex"><span>My date is flexible</span></label>
+      <label class="f w2">Preferred start time<input class="in" id="ctStart" placeholder="e.g. 7pm"></label>
+      ${sel('ctHours', 'Hours of live music', INQ.hours, false, 'w2')}
+      <label class="f w2">Venue or location name<input class="in" id="ctVenue" autocomplete="off"></label>
+      <label class="f w2">City *<input class="in" id="ctCity" autocomplete="address-level2" required></label>
+      ${sel('ctOutside', 'Outside the OKC metro?', INQ.yesno, false, 'w2')}
+      ${sel('ctBudget', 'Budget', INQ.budgets, false, 'w2')}
+      ${sel('ctGuests', 'Expected guests', INQ.guests, false, 'w2')}
+      ${sel('ctSetting', 'Indoor or outdoor?', INQ.settings, false, 'w2')}
+      ${sel('ctPower', 'Is power available at the venue?', INQ.yesno, false, 'w2')}
+      ${sel('ctHeard', 'How did you hear about us?', INQ.heard, false, 'w2')}
+      <label class="f w4">Anything else we should know?<textarea class="in" id="ctMsgText" rows="4" placeholder="Songs you love, ceremony or dinner timing, sound limits, load-in details…"></textarea></label>
+      <label class="hp" aria-hidden="true">Website<input id="ctWebsite" tabindex="-1" autocomplete="off"></label>
+    </div>
+    <p class="small muted" style="margin:14px 0 4px">Trailer Folk brings all the sound and lighting. We just need a power source and a place to set up.</p>
+    <div class="row" style="margin-top:10px"><button class="btn gold big" type="submit" id="ctSend">Send request</button></div>
+    <p class="small" id="ctMsg" style="color:var(--bad);min-height:1.5em;margin-top:8px"></p></form>${'<div class="pub-social small muted">Questions first? <a href="mailto:' + BAND_EMAIL_PUB + '">' + BAND_EMAIL_PUB + '</a></div>'}`;
+}
+function thanksView() {
+  return `${title('Thank you!')}<div class="card-ish"><p style="font-size:17px;margin:0 0 10px">Thanks${UI.pubSent && UI.pubSent !== true ? ', ' + esc(UI.pubSent) : ''} &mdash; we got your request.</p>
+    <p class="muted" style="margin:0 0 18px">We’ll reply with availability and a quote, usually within two business days. If it’s urgent, email <a href="mailto:${BAND_EMAIL_PUB}">${BAND_EMAIL_PUB}</a>.</p>
+    <div class="pub-btns"><a class="btn big" href="${PRESS_KIT}" target="_blank" rel="noopener">See our Press Kit</a><a class="btn big" href="#" data-act="pub-again">Back to start</a></div></div>`;
+}
+async function sendInquiry() {
+  const msg = $('#ctMsg'), btn = $('#ctSend'); msg.textContent = ''; const val = id => { const el = $('#' + id); return el ? el.value.trim() : ''; };
+  const email = val('ctEmail'), phone = val('ctPhone'), noDate = $('#ctNoDate').checked;
+  const miss = []; if (val('ctName').length < 2) miss.push('your name'); if (!email && phone.replace(/\D/g, '').length < 7) miss.push('an email or phone number'); if (!val('ctEvent')) miss.push('the type of event'); if (!noDate && !val('ctDate')) miss.push('the event date (or tick “I don’t have a date yet”)'); if (!val('ctCity')) miss.push('the city');
+  if (miss.length) { msg.textContent = 'Please add ' + miss.join(', ') + '.'; return; }
+  const body = { name: val('ctName'), email, phone, contact_pref: val('ctPref'), event_type: val('ctEvent'), event_date: noDate ? '' : val('ctDate'), no_date: noDate, date_flex: $('#ctFlex').checked, start_time: val('ctStart'), hours: val('ctHours'), venue: val('ctVenue'), city: val('ctCity'),
+    outside_okc: val('ctOutside'), budget: val('ctBudget'), guests: val('ctGuests'), setting: val('ctSetting'), power: val('ctPower'), heard_from: val('ctHeard'), message: val('ctMsgText'), website: val('ctWebsite'), ms: Date.now() - (UI.pubShown || Date.now()) };
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/band-inquiry`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({})); if (!r.ok || !j.ok) throw new Error(j.error || 'Something went wrong on our end. Please email us instead.');
+    UI.pubSent = body.name.split(' ')[0] || true; render(); const sc = $('#app'); if (sc) sc.scrollTop = 0;
+  } catch (err) { msg.textContent = navigator.onLine === false ? 'You appear to be offline. Please try again when you have a connection.' : (err.message || 'Please email us instead.'); btn.disabled = false; btn.textContent = 'Send request'; }
 }
 function notMemberView() {
   return shell('home', `${title('Almost in')}
@@ -796,6 +867,13 @@ function setlistSets(L, compact) {
       ${brk && brk.kind === 'break' && n < plan.sets ? `<div class="small muted" style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">Break · ${brk.dur} min${brk.from ? ` · ${brk.from}–${brk.to}` : ''}</div>` : ''}
     </section>`; }).join('')}</div>`;
 }
+function inquiryPanel(g) {
+  const rows = [['Event', g.lead_event_type], ['Budget', g.lead_budget], ['Outside OKC metro', g.lead_outside_okc], ['Guests', g.lead_guests], ['Setting', g.lead_setting], ['Power at venue', g.lead_power], ['Heard about us', g.lead_heard_from], ['Prefers', g.lead_contact_pref], ['Date', g.lead_date_flex ? 'Flexible' : '']].filter(r => r[1]);
+  if (g.lead_source !== 'website' && !rows.length) return '';
+  const metro = g.lead_outside_okc === 'Yes' ? '<span class="pill" style="color:var(--gold);border-color:var(--gold)">Travel — price it</span>' : '';
+  return `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Inquiry details</h2>${g.lead_source === 'website' ? '<span class="pill">From the website</span>' : ''}${metro}<span class="spacer"></span>${g.lead_received_at ? `<span class="small muted">Received ${esc(agoText(g.lead_received_at))}</span>` : ''}</div>
+    <div class="kv" style="margin-top:12px">${rows.map(([k, v]) => `<div><div class="eyebrow">${k}</div><div class="v">${esc(v)}</div></div>`).join('')}</div></section>`;
+}
 function gigRead(g) {
   const st = settings(), c = clientOf(g) || {}, practice = g.kind === 'practice', mgr = true, L = listOf(g.id);   // everything except the roster is open to all members
   const tbd = '<span class="faint">TBD</span>';
@@ -809,6 +887,7 @@ function gigRead(g) {
   const setlistPanel = practice ? '' : `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Setlist</h2><span class="spacer"></span>${L ? `<a class="btn sm gold" href="#setlist/${L.id}">Open setlist</a>` : (mgr ? `<button class="btn sm gold" data-act="sl-new" data-gig="${g.id}">New setlist</button>` : '')}</div>
       <div style="margin-top:12px">${L ? setlistSets(L, true) : `<p class="muted" style="margin:0">${g.songs_played_legacy ? g.songs_played_legacy + ' songs played (count from the old sheet).' : 'No setlist yet.'}</p>`}</div></section>`;
   const left = `<section class="panel"><h2 class="sec">Details</h2><div class="kv">${facts.join('')}</div></section>
+    ${practice ? '' : inquiryPanel(g)}
     ${g.notes ? `<section class="panel"><h2 class="sec">${practice ? 'Plan' : 'Notes'}</h2><p style="margin:0;white-space:pre-wrap">${esc(g.notes)}</p></section>` : ''}
     ${dayOfPanel(g)}
     ${photosPanel(g, false)}
@@ -2372,6 +2451,7 @@ document.addEventListener('change', e => {
 
 document.addEventListener('change', async e => {
   const t = e.target; if (!t.matches) return;
+  if (t.id === 'ctNoDate') { const d = $('#ctDate'); if (d) { d.disabled = t.checked; d.required = !t.checked; if (t.checked) d.value = ''; } return; }
   if (t.matches('[data-chart-up]')) {
     const f = t.files[0], sid = t.dataset.chartUp; t.value = ''; if (!f) return;
     try { toast('Uploading chart…'); await uploadChart(sid, f); toast('Chart saved'); refreshChartBox(sid); } catch (err) { toast(err.message || 'Upload failed', true); }
@@ -2403,6 +2483,7 @@ document.addEventListener('change', async e => {
 });
 
 document.addEventListener('submit', async e => {
+  if (e.target.id === 'contactForm') { e.preventDefault(); return sendInquiry(); }
   if (e.target.id !== 'loginForm') return; e.preventDefault();
   const msg = $('#lgMsg'); msg.textContent = '';
   try { await api.signIn($('#lgEmail').value.trim(), $('#lgPass').value); } catch (err) { msg.textContent = err.message; }
@@ -2521,6 +2602,7 @@ const ACTIONS = {
   },
   'digest-test': async () => { if (!S.me.email) return toast('Add your email under Admin → Roster first.', true); const r = await digestCall('test=' + encodeURIComponent(S.me.email)); if (r) toast(r.failed && r.failed.length ? 'Failed: ' + r.failed[0] : `Test digest sent to ${(r.sent || [])[0] || S.me.email}`, !!(r.failed && r.failed.length)); },
   'search-open': () => openSearch(),
+  'pub-again': () => { UI.pubSent = null; location.hash = ''; render(); },
   'training': () => {
     const m = $('#whoMenu'); if (m) m.hidden = true;
     openModal(`<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(520px,100%)"><div class="row"><h2 class="sec" style="margin:0">Training docs</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div>
