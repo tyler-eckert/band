@@ -1,4 +1,4 @@
-Trailer Folk HQ - latest full set (rev 40, index.html loads app.js?v=51)
+Trailer Folk HQ - latest full set (rev 41, index.html loads app.js?v=52)
 
 PUSH TO GITHUB (repo root, replacing the old copies):
   index.html, app.js, sw.js
@@ -17,8 +17,8 @@ DEPLOY (Supabase Edge Functions, JWT verification OFF for both):
 NOT INCLUDED (keep your existing copies): CNAME, assets/, vendor/
 
 Checksums:
-9949a03f0f7de41a59c225ace3539cae  ./app.js
-62f83c267c0f93304c3f4fe493b3cdae  ./index.html
+59cc41acb98e06f54c76b4ec36ba0a8e  ./app.js
+c7c88b1259deaaf8fc5b64ad2be1961a  ./index.html
 96de323330f8b8336f637a0051835e00  ./pdf.min.js
 a53a71a2a5d618ed0f86ebf099db032a  ./pdf.worker.min.js
 2ee41112a44fe7014dce33e26468ba93  ./pdfjs-LICENSE.txt

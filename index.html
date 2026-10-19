@@ -420,6 +420,25 @@ main{padding-bottom:72px}
 .srch-item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line-soft);color:var(--cream);padding:12px 14px;font-family:inherit;font-size:16px;border-radius:0}
 .srch-item .grow{flex:1;min-width:0;display:flex;flex-direction:column}.srch-item .t{font-weight:700}.srch-item .s{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .srch-item.sel,.srch-item:active{background:rgba(255,191,67,.14)}
+/* ---------- setlist editor: drag handle + bigger buttons ---------- */
+.song.editable{grid-template-columns:44px 22px minmax(0,1fr) auto;padding:6px 0}
+.grip{width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:grab;touch-action:none;border-radius:10px;-webkit-user-select:none;user-select:none}
+.grip svg{width:24px;height:24px;pointer-events:none}
+.grip:hover,.grip:active{background:rgba(255,191,67,.14);color:var(--gold)}
+.song.editable .acts{opacity:.9;gap:2px}
+.song.editable .acts .ib{font-size:21px;min-width:42px;min-height:42px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;padding:0}
+.song.editable .acts .ib:active{background:rgba(255,191,67,.14)}
+.song.dragging{opacity:.3}
+.drag-ghost{position:fixed!important;z-index:200;margin:0;background:#1d1608;border:1px solid var(--gold)!important;border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.6);padding:4px 8px!important;pointer-events:none;opacity:.97}
+.song.drop-before{box-shadow:0 -3px 0 var(--gold)}
+.song.drop-after{box-shadow:0 3px 0 var(--gold)}
+.set.drop-into{outline:2px dashed var(--gold);outline-offset:-4px}
+body.offline .grip{display:none}
+.set{container-type:inline-size}
+.song.editable{-webkit-user-select:none;user-select:none}
+body.song-dragging{-webkit-user-select:none;user-select:none;cursor:grabbing}
+@container (max-width:600px){ .song.editable{grid-template-columns:44px 22px minmax(0,1fr)} .song.editable .acts{grid-column:3/-1;justify-content:flex-start;opacity:1;margin:-6px 0 0 -10px} }
+.song.editable .n{text-align:center}
 </style>
 </head>
 <body>
@@ -427,6 +446,6 @@ main{padding-bottom:72px}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=51"></script>
+<script src="app.js?v=52"></script>
 </body>
 </html>
