@@ -444,6 +444,19 @@ body.song-dragging{-webkit-user-select:none;user-select:none;cursor:grabbing}
 .who-menu{display:flex;flex-direction:column;gap:6px;min-width:176px}
 .who-menu .btn{width:100%;text-align:left}
 #gigMode.gm-doc #gmPenBtn,#gigMode.gm-doc [data-gm=list]{display:none}
+/* ---------- the front door (signed out) ---------- */
+.login .fm.pub{max-width:520px}
+.login .fm.wide{max-width:760px}
+.pub-tag{font:800 13px/1.2 var(--display);font-stretch:118%;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+.pub-btns{display:flex;flex-direction:column;gap:12px;max-width:420px}
+.btn.big{display:flex;justify-content:center;align-items:center;padding:16px 22px;font-size:16px;font-weight:800;border-radius:99px;text-decoration:none;min-height:54px}
+.pub-social{margin-top:22px}
+.pub-back{align-self:flex-start;display:inline-flex;margin-bottom:14px}
+.card-ish{max-width:560px}
+label.hp{position:absolute!important;left:-9999px;width:1px;height:1px;overflow:hidden}
+.fgrid .check{display:flex;align-items:center;gap:8px;font-size:14px;text-transform:none;letter-spacing:0;color:var(--cream);font-weight:400}
+.fgrid .check input{width:20px;height:20px;accent-color:var(--gold)}
+@media (max-width:620px){ .login .fm.wide .fgrid{grid-template-columns:minmax(0,1fr)} .login .fm.wide .fgrid .w2,.login .fm.wide .fgrid .w4{grid-column:1/-1} }
 </style>
 </head>
 <body>
@@ -451,6 +464,6 @@ body.song-dragging{-webkit-user-select:none;user-select:none;cursor:grabbing}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=55"></script>
+<script src="app.js?v=56"></script>
 </body>
 </html>
