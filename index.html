@@ -356,7 +356,7 @@ a.back:active{background:rgba(243,238,228,.14)}
 main.view,.modal>*{zoom:var(--tz,1)}
 /* ---------- offline (view-only) ---------- */
 .offline-bar{flex:none;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;padding:6px 12px;background:#2a1d05;color:var(--gold);font-size:13px;border-bottom:1px solid var(--line)}
-body.offline :is([data-act="gig-edit"],[data-act="sl-edit"],[data-act^="new-"],[data-act="sl-new"],[data-act="song-new"],[data-act="song-edit-mode"],[data-act="gig-na"],[data-act="set-status"],[data-act^="exp-"],[data-act^="sale-"],[data-act^="merch-"],[data-act="opt-open"],[data-act="set-default"],[data-act="set-clear-ask"],[data-act="sl-dup"],[data-act="sl-del-ask"],[data-act="sl-unassign"],[data-act="rotate-token"],[data-act="save-settings"],[data-act="save-members"],[data-act="song-save"],[data-act="photo-del"],[data-act^="chart-del"],[data-act="chart-use"]),
+body.offline :is([data-act="gig-edit"],[data-act="sl-edit"],[data-act^="new-"],[data-act="sl-new"],[data-act="song-new"],[data-act="song-edit-mode"],[data-act="gig-na"],[data-act^="trash-"],[data-act^="digest-"],[data-act="set-status"],[data-act^="exp-"],[data-act^="sale-"],[data-act^="merch-"],[data-act="opt-open"],[data-act="set-default"],[data-act="set-clear-ask"],[data-act="sl-dup"],[data-act="sl-del-ask"],[data-act="sl-unassign"],[data-act="rotate-token"],[data-act="save-settings"],[data-act="save-members"],[data-act="song-save"],[data-act="photo-del"],[data-act^="chart-del"],[data-act="chart-use"]),
 body.offline label:has(:is([data-photo],[data-chart-import],[data-chart-up])){display:none!important}
 body.offline :is(.chk,.stars:not(.ro),[data-chart-default],[data-text-size]){pointer-events:none;opacity:.45}
 body.offline [data-text-size]{pointer-events:auto;opacity:1}
@@ -384,6 +384,42 @@ main{padding-bottom:72px}
 .gm-tb{min-height:38px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:rgba(243,238,228,.08);color:var(--cream);font-weight:700;font-size:14px;font-family:inherit}
 .gm-tb.on{background:var(--gold);color:#140e02;border-color:var(--gold)}
 .gm-tb.done{background:rgba(255,191,67,.16);color:var(--gold)}
+.toast.with-act{display:flex;align-items:center;gap:14px;pointer-events:auto}
+.toast-act{background:#140e02;color:var(--gold);border:0;border-radius:8px;padding:7px 14px;font-weight:800;font-family:inherit;font-size:14px}
+/* ---------- day sheet ---------- */
+.ds{max-width:860px;background:linear-gradient(180deg,rgba(243,238,228,.05),rgba(243,238,228,.02));border:1px solid var(--line-soft);border-radius:var(--r);padding:26px}
+.ds h1{font-size:clamp(28px,5vw,44px);color:var(--gold)}
+.ds-date{font-size:18px;color:var(--cream)}
+.ds-facts{margin:20px 0;padding:16px 0;border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft)}
+.ds-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px 26px;margin:6px 0 18px}
+.ds-grid section .eyebrow,.ds-sets .eyebrow,.ds-band .eyebrow{margin-bottom:3px}
+.ds-photos{margin:6px 0 18px}
+.ds-sets{margin-top:10px;border-top:1px solid var(--line-soft);padding-top:14px}
+.ds-set{margin:10px 0 14px}.ds-set ol{margin:6px 0 0;padding-left:26px}.ds-set li{padding:3px 0}.ds-set .nm{font-weight:700;font-size:17px}
+.ds-band{margin-top:16px;border-top:1px solid var(--line-soft);padding-top:12px}
+@media print{
+  html,body{height:auto!important;overflow:visible!important;background:#fff!important}
+  #app{position:static!important;display:block!important;overflow:visible!important}
+  .scroll{overflow:visible!important}
+  .top,.tabbar,.sa-top,.noprint,.offline-bar,.toast,.who-menu,.ptr{display:none!important}
+  main{padding:0!important;max-width:none!important;zoom:1!important}
+  .ds{border:0!important;background:#fff!important;padding:0!important;max-width:none!important}
+  .ds,.ds *{color:#111!important;border-color:#bbb!important}
+  .ds h1{color:#8a5a00!important}.ds .eyebrow{color:#7a6a40!important}.ds a{text-decoration:none}
+  .ds-set li,.ds-grid section{break-inside:avoid}
+}
+/* ---------- global search ---------- */
+.srch-btn{display:flex;align-items:center;background:none;border:0;color:var(--cream);padding:6px 10px;cursor:pointer}
+.srch-btn svg{width:22px;height:22px}
+.srch{position:fixed;inset:0;z-index:96;background:#0a0702;display:flex;flex-direction:column;align-items:center;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 16px}
+.srch>*{width:100%;max-width:760px}
+.srch-top{display:flex;gap:10px;align-items:center}
+.srch-top .in{flex:1;font-size:18px;padding:12px 14px}
+.srch-res{flex:1;min-height:0;overflow-y:auto;margin-top:12px;-webkit-overflow-scrolling:touch}
+.srch-g{margin-bottom:14px}
+.srch-item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line-soft);color:var(--cream);padding:12px 14px;font-family:inherit;font-size:16px;border-radius:0}
+.srch-item .grow{flex:1;min-width:0;display:flex;flex-direction:column}.srch-item .t{font-weight:700}.srch-item .s{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srch-item.sel,.srch-item:active{background:rgba(255,191,67,.14)}
 </style>
 </head>
 <body>
@@ -391,6 +427,6 @@ main{padding-bottom:72px}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=46"></script>
+<script src="app.js?v=51"></script>
 </body>
 </html>
