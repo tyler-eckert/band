@@ -53,7 +53,7 @@ const api = window.__BAND_MOCK__ || {
 const S = { session: null, me: null, loaded: false };
 TABLES.forEach(t => S[t] = []);
 S._noteOpen = {}; S.offline = false;
-const APP_V = 39;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 40;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1766,7 +1766,7 @@ function gmPtr(e) {
     }
     gmRedraw(c.pg);
   } else if (e.type === 'pointerup' || e.type === 'pointercancel') {
-    if (GMK.scroll && e.pointerId === GMK.scroll.id) { GMK.scroll = null; return; }
+    if (GMK.scroll && e.pointerId === GMK.scroll.id) { const moved = GMK.scroll.go; GMK.scroll = null; if (moved) gmSnap(); return; }
     const c = GMK.cur; if (!c || e.pointerId !== c.id) return; GMK.cur = null;
     if (c.stroke && c.stroke.pts.length) { GMK.strokes.push(c.stroke); GMK.undo.push({ add: c.stroke }); gmMarksSaveSoon(); }
     else if (c.removed.length) { GMK.undo.push({ del: c.removed }); gmMarksSaveSoon(); }
@@ -1794,7 +1794,7 @@ function openGigMode(seq, lid, opts = {}) {
   const saved = lid ? Number(sessionStorage.getItem('tfgm:' + lid)) : 0; GM.i = saved >= 0 && saved < seq.length ? saved : 0;
   const d = document.createElement('div'); d.id = 'gigMode'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', 'Gig mode');
   d.innerHTML = `<div class="gm-top"><button class="gm-btn" data-gm="exit" aria-label="Exit gig mode">✕</button>
-    <div class="gm-title"><div class="gm-t1" id="gmT1"></div><div class="gm-t2"><span id="gmT2"></span> <span id="gmPre"></span></div></div>
+    <div class="gm-title"><div class="gm-t1" id="gmT1"></div><div class="gm-t2"><span id="gmT2"></span><span id="gmPg"></span> <span id="gmPre"></span></div></div>
     <button class="gm-awake" data-gm="awake" id="gmAwake"></button>
     <button class="gm-btn" data-gm="pen" id="gmPenBtn" aria-label="Pencil markup">Pen</button><button class="gm-btn" data-gm="zoom-out" aria-label="Smaller">A−</button><button class="gm-btn" data-gm="zoom-in" aria-label="Bigger">A+</button>${GM.preview ? '' : '<button class="gm-btn" data-gm="list" aria-label="Song list">☰</button>'}</div>
     <input id="gmKeys" class="gm-keys" readonly inputmode="none" autocomplete="off" autocapitalize="off" aria-hidden="true" tabindex="-1">
@@ -1805,6 +1805,8 @@ function openGigMode(seq, lid, opts = {}) {
   const focusKeys = () => { const k = $('#gmKeys'); if (GM.open && k && document.activeElement !== k) { try { k.focus({ preventScroll: true }); } catch {} } };
   d.addEventListener('pointerup', () => setTimeout(focusKeys, 30)); d.addEventListener('click', () => setTimeout(focusKeys, 30)); d.addEventListener('focusout', () => setTimeout(focusKeys, 120));
   focusKeys();
+  let pgT = null; d.querySelector('#gmView').addEventListener('scroll', () => { clearTimeout(pgT); pgT = setTimeout(gmPageInd, 120); });
+  let rzT = null; GM.onResize = () => { clearTimeout(rzT); rzT = setTimeout(() => { if (GM.open) gmLoadChart(); }, 250); }; window.addEventListener('resize', GM.onResize);
   const gv = d.querySelector('#gmView'); ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach(t => gv.addEventListener(t, gmPtr)); gv.addEventListener('contextmenu', e => { if (GMK.on) e.preventDefault(); });
   GMK.on = false; GMK.cur = null; marksSync();
   mediaOff(); if (UI.media) mediaOn(d => gmTurn(d === 'next' ? 1 : -1));
@@ -1812,6 +1814,7 @@ function openGigMode(seq, lid, opts = {}) {
   marksPull([...new Set(seq.map(x => x.song && x.song.id).filter(Boolean))]).then(ch => { if (ch && GM.open) gmMarksLoad(GM.tok); });
 }
 function closeGigMode(quiet) {
+  if (GM.onResize) { window.removeEventListener('resize', GM.onResize); GM.onResize = null; }
   mediaOff(); gmMarksFlush(); GMK.on = false; GMK.cur = null;
   const d = $('#gigMode'); if (d) d.remove();
   document.removeEventListener('keydown', gmKey, true); document.removeEventListener('visibilitychange', gmVis);
@@ -1826,11 +1829,27 @@ async function gmWake() {
 function gmBadge() { const b = $('#gmAwake'); if (b) b.innerHTML = GM.awake ? '<span style="color:var(--ok)">● awake</span>' : '<span style="color:var(--gold)">may sleep</span>'; }
 function gmVis() { if (document.visibilityState === 'visible' && GM.open) gmWake(); }
 /* Bluetooth page-turner pedals send ordinary keys (arrows / Page Up-Down). A press scrolls the chart a page; at the end of the chart it moves to the next song. */
+function gmPageIdx(v, slots) {                                       // which page is on screen (the one whose middle is nearest the middle of the view)
+  const vt = v.getBoundingClientRect().top, mid = v.scrollTop + v.clientHeight / 2; let best = 0, bd = Infinity;
+  slots.forEach((s, i) => { const d = Math.abs(s.getBoundingClientRect().top - vt + v.scrollTop + s.offsetHeight / 2 - mid); if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+function gmGoTo(v, slot) { const top = slot.getBoundingClientRect().top - v.getBoundingClientRect().top + v.scrollTop; if (v.scrollTo) v.scrollTo({ top, behavior: 'smooth' }); else v.scrollTop = top; }
+function gmSnap() { const v = $('#gmView'); if (!v || GM.zoom !== 1) return; const slots = [...v.querySelectorAll('.gm-slot')]; if (slots.length) gmGoTo(v, slots[gmPageIdx(v, slots)]); }
+function gmPageInd() { const el = $('#gmPg'), v = $('#gmView'); if (!el || !v) return; const slots = [...v.querySelectorAll('.gm-slot')]; el.textContent = slots.length > 1 && GM.zoom === 1 ? ` · page ${gmPageIdx(v, slots) + 1}/${slots.length}` : ''; }
+/* Bluetooth page-turner pedals send ordinary keys. Normal size: one press = one whole page, and after the last page it moves to the next song.
+   Zoomed in (A+): one press scrolls most of a screen instead. */
 function gmTurn(dir) {
-  const v = $('#gmView'); if (!v) return gmShow(GM.i + dir);
+  const v = $('#gmView'); if (!v) return gmShow(GM.i + dir, dir < 0);
+  const slots = [...v.querySelectorAll('.gm-slot')];
+  if (GM.zoom === 1 && slots.length) {
+    const nxt = gmPageIdx(v, slots) + dir;
+    if (nxt < 0 || nxt >= slots.length) return gmShow(GM.i + dir, dir < 0);
+    gmGoTo(v, slots[nxt]); setTimeout(gmPageInd, 450); return;
+  }
   const room = dir > 0 ? v.scrollHeight - v.clientHeight - v.scrollTop : v.scrollTop, step = dir * Math.round(v.clientHeight * 0.88);
   if (room > 6) { if (v.scrollBy) v.scrollBy({ top: step, behavior: 'smooth' }); else v.scrollTop += step; }
-  else gmShow(GM.i + dir);
+  else gmShow(GM.i + dir, dir < 0);
 }
 const pedSig = e => ({ k: e.key, c: e.code || '', kc: e.keyCode || 0 });
 const pedHit = (e, list) => (list || []).some(s => (s.k && s.k !== 'Unidentified' && e.key === s.k) || (s.c && e.code && e.code === s.c) || (s.kc && e.keyCode === s.kc && (!s.k || s.k === 'Unidentified')));
@@ -1904,9 +1923,9 @@ function gmDrawer() {
   let last = null;
   dr.innerHTML = `<div class="row" style="padding:12px"><b style="font-size:18px">Songs</b><span class="spacer"></span><button class="gm-btn" data-gm="list">✕</button></div>` + GM.seq.map((x, k) => { const h = x.set !== last ? `<div class="gm-dh">Set ${x.set}</div>` : ''; last = x.set; const s = x.song || {}; return `${h}<button class="gm-di ${k === GM.i ? 'on' : ''}" data-gm="go" data-i="${k}"><span class="n">${k + 1}</span><span class="grow">${esc(s.title || '?')}</span><span class="small">${esc(songLabel(s))}${chartFor(s.id) || x.forceChart ? '' : ' · no chart'}</span></button>${x.item && x.item.note ? `<div class="gm-dn">${esc(x.item.note)}</div>` : ''}`; }).join('');
 }
-function gmShow(i) {
+function gmShow(i, toEnd) {
   if (i < 0 || i >= GM.seq.length) return;
-  gmMarksFlush();
+  gmMarksFlush(); GM.landEnd = !!toEnd;                          // going back lands on the last page of the previous song
   GM.i = i; if (GM.lid) sessionStorage.setItem('tfgm:' + GM.lid, String(i));
   const cur = GM.seq[i], s = cur.song || {}, inSet = GM.seq.filter(x => x.set === cur.set), pos = inSet.indexOf(cur) + 1;
   $('#gmT1').textContent = s.title || '(deleted song)';
@@ -1935,7 +1954,7 @@ function gmNoChart(cur) {
   return `<div class="gm-card"><div class="gm-big">${esc(s.title || '')}</div><div class="gm-bigsub">Key ${esc(s.song_key || '?')}${s.capo ? ' · capo ' + s.capo : ''}</div>${s.starter ? `<div>Starts: <b>${esc(s.starter)}</b></div>` : ''}${s.lead_vox ? `<div>Lead vocal: ${esc(s.lead_vox)}</div>` : ''}${s.comment ? `<div class="muted" style="margin-top:8px">${esc(s.comment)}</div>` : ''}<div class="muted" style="margin-top:14px">No PDF chart for you on this one yet.</div></div>`;
 }
 async function gmLoadChart() {
-  const tok = ++GM.tok, cur = GM.seq[GM.i], v = $('#gmView'); if (!v) return; v.scrollTop = 0; v.scrollLeft = 0;
+  GM.pageCount = 0; const tok = ++GM.tok, cur = GM.seq[GM.i], v = $('#gmView'); if (!v) return; v.scrollTop = 0; v.scrollLeft = 0;
   const ch = cur.forceChart ? { chart: cur.forceChart } : (cur.song ? chartFor(cur.song.id) : null);
   if (!ch) { v.innerHTML = gmNoChart(cur); return; }
   v.innerHTML = '<div class="gm-msg">Loading chart…</div>';
@@ -1943,19 +1962,22 @@ async function gmLoadChart() {
     const [lib, buf] = await Promise.all([loadPdfJs(), chartData(ch.chart)]); if (tok !== GM.tok) return;
     const pdf = await lib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise; if (tok !== GM.tok) { pdf.destroy(); return; }
     if (GM.doc) { try { GM.doc.destroy(); } catch {} } GM.doc = pdf;
-    v.innerHTML = ''; GM.pgs = []; const W = v.clientWidth - 12, H = v.clientHeight - 12, dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const paged = GM.zoom === 1; v.classList.toggle('paged', paged);                   // normal size: one whole page per screen
+    v.innerHTML = ''; GM.pgs = []; const W = v.clientWidth - (paged ? 0 : 12), H = v.clientHeight - (paged ? 0 : 12), dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     for (let n = 1; n <= pdf.numPages; n++) {
       const page = await pdf.getPage(n); if (tok !== GM.tok) return;
       const v0 = page.getViewport({ scale: 1 });
-      let w = W * GM.zoom; if (GM.zoom === 1 && pdf.numPages === 1) w = Math.min(W, H * v0.width / v0.height);     // a one-page chart fits the whole screen
+      const fitW = Math.min(W, H * v0.width / v0.height), w = fitW * GM.zoom;                                  // A+ / A− scale up from the whole-page fit
       const vp = page.getViewport({ scale: w / v0.width * dpr });
       const cv = document.createElement('canvas'); cv.className = 'gm-page'; cv.width = Math.floor(vp.width); cv.height = Math.floor(vp.height); cv.style.width = vp.width / dpr + 'px'; cv.style.height = vp.height / dpr + 'px';
       const cssW = vp.width / dpr, cssH = vp.height / dpr, wrap = document.createElement('div'), ov = document.createElement('canvas');
       wrap.className = 'gm-pg'; wrap.style.width = cssW + 'px'; wrap.style.height = cssH + 'px';
       ov.className = 'gm-ov'; ov.dataset.pg = String(n - 1); ov.width = cv.width; ov.height = cv.height; ov.style.width = cssW + 'px'; ov.style.height = cssH + 'px';
-      wrap.append(cv, ov); v.appendChild(wrap); GM.pgs.push({ ov, w: cssW, h: cssH, dpr });
+      const slot = document.createElement('div'); slot.className = 'gm-slot'; if (paged) slot.style.height = v.clientHeight + 'px';
+      wrap.append(cv, ov); slot.appendChild(wrap); v.appendChild(slot); GM.pgs.push({ ov, w: cssW, h: cssH, dpr });
       await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
     }
+    GM.pageCount = pdf.numPages; if (GM.landEnd) { GM.landEnd = false; v.scrollTop = v.scrollHeight; } gmPageInd();
     await gmMarksLoad(tok);
   } catch (e) { if (tok === GM.tok) v.innerHTML = `<div class="gm-msg">Couldn’t show this chart${navigator.onLine ? '' : ' — you’re offline and it hasn’t been saved on this phone yet'}.<br><small>${esc(e.message || '')}</small></div>${gmNoChart(cur)}`; }
 }

@@ -362,6 +362,10 @@ main{padding-bottom:72px}
 @media (min-width:700px){ .top{padding-top:calc(env(safe-area-inset-top,0px) + var(--hdr,56px))} .tabbar{bottom:-24px;padding-bottom:calc(24px + var(--ftr,14px))} }   /* --ftr = how far the icons sit above the screen edge */
 /* ---------- pencil markup ---------- */
 .gm-pg{position:relative;flex:none;margin:0 auto}
+.gm-slot{width:100%;flex:none;display:flex;align-items:center;justify-content:center}
+.gm-view.paged{gap:0;padding:0;scroll-snap-type:y mandatory}
+.gm-view.paged .gm-slot{scroll-snap-align:start;scroll-snap-stop:always}
+.gm-pen .gm-view.paged{scroll-snap-type:none}
 .gm-ov{position:absolute;inset:0;pointer-events:none}
 .gm-pen .gm-ov{pointer-events:auto;touch-action:none;cursor:crosshair}
 .gm-pen .gm-view{touch-action:none}
@@ -380,6 +384,6 @@ main{padding-bottom:72px}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=39"></script>
+<script src="app.js?v=40"></script>
 </body>
 </html>
