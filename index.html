@@ -319,6 +319,7 @@ a.back:active{background:rgba(243,238,228,.14)}
 /* ---------- gig mode ---------- */
 #gigMode{position:fixed;inset:0;z-index:90;background:#0a0702;display:flex;flex-direction:column;color:var(--cream);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;outline:none}
 #gigMode *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.gm-keys{position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;border:0;padding:0;pointer-events:none}
 .gm-top{flex:none;display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;background:#14100a;border-bottom:1px solid var(--line-soft)}
 .gm-title{flex:1;min-width:0}.gm-t1{font-weight:800;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gm-t2{font-size:12px;color:var(--muted)}
 .gm-btn{min-width:46px;height:44px;padding:0 10px;border-radius:12px;border:1px solid var(--line);background:rgba(243,238,228,.08);color:var(--cream);font-size:16px;font-weight:700;font-family:inherit}
@@ -379,6 +380,6 @@ main{padding-bottom:72px}
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=38"></script>
+<script src="app.js?v=39"></script>
 </body>
 </html>
