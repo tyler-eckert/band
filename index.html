@@ -42,7 +42,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
 /* app shell: header and tab bar never move; only .scroll scrolls (stops iOS toolbar collapse from shifting the footer) */
-#app{position:fixed;inset:0;display:flex;flex-direction:column;overflow-y:auto;background-color:#0e0a01;background-image:radial-gradient(120% 80% at 85% 0%, #2c1d03 0%, var(--ink-1) 45%, var(--ink-0) 100%)}   /* an opaque, fixed, full-screen container: iPadOS 26+ skips its glass blur over this */
+#app{position:absolute;inset:0;display:flex;flex-direction:column;overflow-y:auto;background-color:#0e0a01;background-image:radial-gradient(120% 80% at 85% 0%, #2c1d03 0%, var(--ink-1) 45%, var(--ink-0) 100%)}   /* an opaque, fixed, full-screen container: iPadOS 26+ skips its glass blur over this */
 .scroll{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
 body{
   background:radial-gradient(120% 80% at 85% 0%, #2c1d03 0%, var(--ink-1) 45%, var(--ink-0) 100%) fixed var(--ink-0);
@@ -65,7 +65,7 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
 
 /* ---------- top bar (press kit nav) ---------- */
-.top{position:fixed;top:0;left:0;right:0;flex:none;z-index:20;display:flex;align-items:stretch;justify-content:space-between;gap:12px;
+.top{position:absolute;top:0;left:0;right:0;flex:none;z-index:20;display:flex;align-items:stretch;justify-content:space-between;gap:12px;
   padding:0 max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left));
   padding-top:calc(max(env(safe-area-inset-top, 0px), 20px) + 18px);
   background:#0e0a01;-webkit-backdrop-filter:none;backdrop-filter:none;isolation:isolate;border-bottom:1px solid var(--line-soft)}   /* solid, like the status-bar strip and the footer: nothing scrolls under it any more, so no see-through haze */
@@ -88,11 +88,12 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .tabbar a{flex:1 1 0;min-width:0;max-width:200px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:8px 0 0;color:var(--muted);text-decoration:none;font-size:10.5px;font-weight:600;line-height:1}
 .tabbar a svg{width:22px;height:22px;display:block;flex:none}
 .tabbar a.on{color:var(--gold)}
-/* iOS 26+/27 Home Screen apps: the OS draws a frosted "scroll edge" blur over the top of the screen unless it finds a
-   solid, viewport-fixed bar touching the top edge. A sticky header inside #app doesn't count (#app is a full-screen box,
-   which iOS ignores), so the header itself is now position:fixed and #app is pushed down by its measured height. */
+/* iOS 26+/27 Home Screen apps: iOS lays its frosted "scroll edge" glass over any position:fixed bar it finds at the top
+   of the screen, which blurred the whole header. The page itself never scrolls (html/body are overflow:hidden), so the
+   shell (#app, .top, .sa-top) uses position:absolute instead: it looks identical but iOS doesn't treat it as a top bar.
+   #app is pushed down by the header's measured height so content starts below it. */
 #app:has(> .top){padding-top:var(--top-h,calc(max(env(safe-area-inset-top,0px),20px) + 83px))}
-.sa-top{position:fixed;top:0;left:0;right:0;height:max(env(safe-area-inset-top,0px),16px);background-color:#0e0a01;z-index:90}   /* solid strip at the very top: also what Safari samples to tint its own bar */
+.sa-top{position:absolute;top:0;left:0;right:0;height:max(env(safe-area-inset-top,0px),16px);background-color:#0e0a01;z-index:90}   /* solid strip at the very top: also what Safari samples to tint its own bar */
 
 main{max-width:1240px;margin:0 auto;padding:28px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
 
@@ -477,6 +478,6 @@ if(h)document.documentElement.style.setProperty('--top-h',h.offsetHeight+'px');}
 new MutationObserver(m).observe(app,{childList:true});addEventListener('resize',m);addEventListener('orientationchange',m);m();})();</script>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=59"></script>
+<script src="app.js?v=60"></script>
 </body>
 </html>
