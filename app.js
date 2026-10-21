@@ -395,7 +395,7 @@ function shell(route, inner) {
   const me = S.me;
   return `
   <header class="top">
-    <a class="brand" href="#home"><img src="assets/logo.png" alt="Trailer Folk"><span class="hide-sm">HQ</span></a>
+    <a class="brand" href="#home"><img src="assets/logo-header.png" alt="Trailer Folk"><span class="hide-sm">HQ</span></a>
     <div class="row" style="gap:0;align-items:stretch">
       <nav class="nav">${NAV.map(([k, l]) => `<a href="#${k}" class="${on(k)}">${l}</a>`).join('')}</nav>
       <button type="button" class="srch-btn" data-act="search-open" aria-label="Search" title="Search (press /)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg></button>
