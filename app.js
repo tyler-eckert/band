@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 62;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 63;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -912,7 +912,7 @@ function gigRead(g) {
     ? [kv('Date', esc(fmtDate(g.gig_date))), kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd), kv('Where', g.venue ? esc(g.venue) : tbd)]
     : [kv('Date', esc(fmtDate(g.gig_date))), kv('Load-in', g.load_in_time ? esc(g.load_in_time) : tbd), g.soundcheck_time ? kv('Sound check', esc(g.soundcheck_time)) : '', kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd),
        kv('Venue', g.venue ? esc(g.venue) : tbd), g.address ? kv('Address', `<a href="${mapUrl}" target="_blank" rel="noopener">${esc(g.address)}</a>`) : ''];
-  const setlistPanel = practice ? '' : `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Setlist</h2><span class="spacer"></span>${L ? `<a class="btn sm gold" href="#setlist/${L.id}">Open setlist</a>` : (mgr ? `<button class="btn sm gold" data-act="sl-new" data-gig="${g.id}">New setlist</button>` : '')}</div>
+  const setlistPanel = practice && !L ? '' : `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Setlist</h2><span class="spacer"></span>${L ? `<a class="btn sm gold" href="#setlist/${L.id}">Open setlist</a>` : (mgr ? `<button class="btn sm gold" data-act="sl-new" data-gig="${g.id}">New setlist</button>` : '')}</div>
       <div style="margin-top:12px">${L ? setlistSets(L, true) : `<p class="muted" style="margin:0">${g.songs_played_legacy ? g.songs_played_legacy + ' songs played (count from the old sheet).' : 'No setlist yet.'}</p>`}</div></section>`;
   const left = `<section class="panel"><h2 class="sec">Details</h2><div class="kv">${facts.join('')}</div></section>
     ${practice ? '' : inquiryPanel(g)}
@@ -938,7 +938,7 @@ function gigRead(g) {
   return `
   <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a></div>
   ${gigHead(g)}
-  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${practice ? '' : `<a class="btn" href="#daysheet/${g.id}">Day sheet</a>`}${!practice && L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button>' : ''}<button class="btn gold" data-act="gig-edit">Edit</button></div>
+  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${practice ? '' : `<a class="btn" href="#daysheet/${g.id}">Day sheet</a>`}${L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button>' : ''}<button class="btn gold" data-act="gig-edit">Edit</button></div>
   ${stepper}
   ${right ? `<div class="split"><div class="stack">${left}</div><div class="stack">${right}</div></div>` : `<div class="stack" style="max-width:820px">${left}</div>`}`;
 }
@@ -1702,7 +1702,7 @@ function expenseModal(e) {
       <label class="f">Amount $<input class="in" type="number" step="any" data-x="amount" value="${esc(e.amount ?? '')}"></label>
       <label class="f w2">Category<select class="in" data-x="category">${['Gear','Cables & stands','Merch stock','Travel','Food','Printing','Fees','Other'].map(c => `<option ${e.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       <label class="f w4">What for<input class="in" data-x="note" value="${esc(e.note || '')}"></label>
-      <label class="f w2">For gig<select class="in" data-x="gig_id"><option value="">— General —</option>${S.gigs.filter(isGig).filter(g => g.gig_date).sort((a, b) => b.gig_date.localeCompare(a.gig_date)).slice(0, 40).map(g => `<option value="${g.id}" ${e.gig_id === g.id ? 'selected' : ''}>${esc(g.title)} (${mdY(g.gig_date)})</option>`).join('')}</select></label>
+      <label class="f w2">For gig<select class="in" data-x="gig_id"><option value="">— General —</option>${S.gigs.filter(g => isGig(g) || g.kind === 'practice').filter(g => g.gig_date).sort((a, b) => b.gig_date.localeCompare(a.gig_date)).slice(0, 40).map(g => `<option value="${g.id}" ${e.gig_id === g.id ? 'selected' : ''}>${esc(g.kind === 'practice' ? 'Practice' : g.title)} (${mdY(g.gig_date)})</option>`).join('')}</select></label>
       <label class="f">Paid by<select class="in" data-x="paid_by"><option value="">Band account</option>${activeMembers().map(m => `<option value="${m.id}" ${e.paid_by === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
       <label class="f">Paid back<span class="check" style="padding:9px 0"><input type="checkbox" data-x="reimbursed" ${e.reimbursed ? 'checked' : ''}> Reimbursed</span></label>
     </div>
