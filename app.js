@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 61;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 62;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1789,7 +1789,7 @@ function activityPanel() {
 function displayInfo() {                                             // what this device reports — handy when something looks off only on the iPad
   const standalone = !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)); let inset = '?';
   try { const p = document.createElement('div'); p.style.cssText = 'position:absolute;visibility:hidden;padding-top:env(safe-area-inset-top,0px)'; document.body.appendChild(p); inset = Math.round(parseFloat(getComputedStyle(p).paddingTop) || 0) + 'px'; p.remove(); } catch {}
-  return `${standalone ? 'Home Screen app' : 'Browser tab'} · top inset ${inset}`;
+  const L = window.__tfLift || {}; return `${standalone ? 'Home Screen app' : 'Browser tab'} · top inset ${inset} · h ${L.ih}/${L.vv}/${L.sh} · lift ${L.lift}px`;
 }
 function contactFormPanel() {
   const st = settings(), cfg = inqMerge(st.inquiry_form), missing = st && Object.keys(st).length && !('inquiry_form' in st);
