@@ -42,7 +42,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
 /* app shell: header and tab bar never move; only .scroll scrolls (stops iOS toolbar collapse from shifting the footer) */
-#app{position:absolute;inset:0;display:flex;flex-direction:column;overflow-y:auto;background-color:#0e0a01;background-image:radial-gradient(120% 80% at 85% 0%, #2c1d03 0%, var(--ink-1) 45%, var(--ink-0) 100%)}   /* an opaque, fixed, full-screen container: iPadOS 26+ skips its glass blur over this */
+#app{position:absolute;inset:0 0 var(--lift,0px) 0;display:flex;flex-direction:column;overflow-y:auto;background-color:#0e0a01;background-image:radial-gradient(120% 80% at 85% 0%, #2c1d03 0%, var(--ink-1) 45%, var(--ink-0) 100%)}   /* an opaque, fixed, full-screen container: iPadOS 26+ skips its glass blur over this */
 .scroll{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
 body{
   background:radial-gradient(120% 80% at 85% 0%, #2c1d03 0%, var(--ink-1) 45%, var(--ink-0) 100%) fixed var(--ink-0);
@@ -82,7 +82,7 @@ h2.sec{font-family:var(--display);font-stretch:125%;font-weight:800;text-transfo
 .who img{width:30px;height:30px;border-radius:50%;object-fit:cover;filter:grayscale(1);border:1px solid var(--line)}
 /* the tab bar is the only navigation, at every screen size, in Safari and in the Home Screen app */
 .nav{display:none}
-.tabbar{display:flex;justify-content:center;position:fixed;left:0;right:0;bottom:-12px;z-index:30;background:#0e0a01;border-top:1px solid var(--line-soft);
+.tabbar{display:flex;justify-content:center;position:fixed;left:0;right:0;bottom:calc(var(--lift,0px) - 12px);z-index:30;background:#0e0a01;border-top:1px solid var(--line-soft);
   padding:4px max(6px,env(safe-area-inset-right)) 14px max(6px,env(safe-area-inset-left))}
 .tabbar::after{content:"";position:absolute;left:0;right:0;top:100%;height:90px;background:#0e0a01}   /* nothing from the page shows beneath the bar */
 .tabbar a{flex:1 1 0;min-width:0;max-width:200px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:8px 0 0;color:var(--muted);text-decoration:none;font-size:10.5px;font-weight:600;line-height:1}
@@ -235,7 +235,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 /* ---------- modal / toast ---------- */
 .scrim{position:fixed;inset:0;background:rgba(5,3,0,.72);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:max(24px,env(safe-area-inset-top)) 16px 24px;overflow:auto}
 .modal{width:min(760px,100%);background:var(--ink-1);border:1px solid var(--line);border-radius:14px;padding:22px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
-.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--gold);color:#140e02;font-weight:700;padding:10px 18px;border-radius:999px;z-index:60;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom) + var(--lift,0px));transform:translateX(-50%);background:var(--gold);color:#140e02;font-weight:700;padding:10px 18px;border-radius:999px;z-index:60;box-shadow:0 10px 30px rgba(0,0,0,.5)}
 .toast.err{background:var(--bad);color:#fff}
 .confirm{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--bad)}
 
@@ -331,7 +331,7 @@ a.back:active{background:rgba(243,238,228,.14)}
 .snote-edit .in{font-size:13px;padding:7px 10px}
 .tbl th[data-act]{cursor:pointer;user-select:none}
 /* ---------- gig mode ---------- */
-#gigMode{position:fixed;inset:0;z-index:90;background:#0a0702;display:flex;flex-direction:column;color:var(--cream);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;outline:none}
+#gigMode{position:fixed;inset:0 0 var(--lift,0px) 0;z-index:90;background:#0a0702;display:flex;flex-direction:column;color:var(--cream);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;outline:none}
 #gigMode *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .gm-keys{position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;border:0;padding:0;pointer-events:none}
 .gm-top{flex:none;display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;background:#14100a;border-bottom:1px solid var(--line-soft)}
@@ -373,7 +373,7 @@ body.offline [data-text-size]{pointer-events:auto;opacity:1}
 .ptr{position:fixed;left:50%;transform:translateX(-50%);z-index:60;background:var(--gold);color:#140e02;font-weight:700;font-size:13px;padding:7px 16px;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);pointer-events:none}
 main{padding-bottom:72px}
 /* iPad: header a little lower than the bare minimum, footer lower */
-@media (min-width:700px){ .top{padding-top:calc(env(safe-area-inset-top,0px) + var(--hdr,56px))} .tabbar{bottom:-24px;padding-bottom:calc(24px + var(--ftr,14px))} }   /* --ftr = how far the icons sit above the screen edge */
+@media (min-width:700px){ .top{padding-top:calc(env(safe-area-inset-top,0px) + var(--hdr,56px))} .tabbar{bottom:calc(var(--lift,0px) - 24px);padding-bottom:calc(24px + var(--ftr,14px))} }   /* --ftr = how far the icons sit above the screen edge */
 /* ---------- pencil markup ---------- */
 .gm-pg{position:relative;flex:none;margin:0 auto}
 .gm-slot{width:100%;flex:none;display:flex;align-items:center;justify-content:center}
@@ -471,6 +471,13 @@ label.hp{position:absolute!important;left:-9999px;width:1px;height:1px;overflow:
 <body>
 <div class="sa-top" aria-hidden="true"></div>
 <div id="app"><main><p class="muted">Loading Trailer Folk HQ…</p></main></div>
+<script>/* iOS Home Screen apps without viewport-fit=cover: iOS pushes the page down below its status bar but can leave the
+   page full-screen height, so the bottom hangs off the screen. --lift raises the tab bar (and gig mode) by the overhang. */
+(function(){function f(){var sa=!!(navigator.standalone||(matchMedia&&matchMedia('(display-mode: standalone)').matches)),lift=0,
+ih=window.innerHeight,vv=window.visualViewport?Math.round(visualViewport.height):ih,sh=Math.max(screen.width,screen.height),sw=Math.min(screen.width,screen.height);
+if(sa&&ih>window.innerWidth){if(vv<ih-4)lift=ih-vv;else if(ih>=sh-2)lift=sh>=852?60:sh>=812?47:20;}
+document.documentElement.style.setProperty('--lift',lift+'px');window.__tfLift={lift:lift,ih:ih,vv:vv,sh:sh};}
+f();addEventListener('resize',f);addEventListener('orientationchange',function(){setTimeout(f,300);});})();</script>
 <script>/* keeps --top-h equal to the fixed header's height (it's re-rendered on every route) */
 (function(){var app=document.getElementById('app'),ro=window.ResizeObserver?new ResizeObserver(m):null,cur=null;
 function m(){var h=app.querySelector(':scope > .top');if(h!==cur){if(ro){if(cur)ro.unobserve(cur);if(h)ro.observe(h);}cur=h;}
@@ -478,6 +485,6 @@ if(h)document.documentElement.style.setProperty('--top-h',h.offsetHeight+'px');}
 new MutationObserver(m).observe(app,{childList:true});addEventListener('resize',m);addEventListener('orientationchange',m);m();})();</script>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=61"></script>
+<script src="app.js?v=62"></script>
 </body>
 </html>
