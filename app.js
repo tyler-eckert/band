@@ -8,8 +8,8 @@ const SUPABASE_KEY = 'sb_publishable_GP4wq5bwrQ3M0qCTwQei4A_Lsk_zBcK';   // publ
 const CAL_FUNCTION = 'band-calendar';                                        // Edge Function name for the live calendar feed
 
 /* ============================================================ data layer */
-const TABLES = ['members','settings','payees','clients','gigs','songs','setlists','setlist_items','song_ratings','merch_items','merch_sales','expenses','song_charts','chart_prefs','chart_defaults'];
-const OPTIONAL = ['song_charts','chart_prefs','chart_defaults'];      // newer tables: the app still loads if their SQL hasn't been run yet
+const TABLES = ['members','settings','payees','clients','gigs','songs','setlists','setlist_items','song_ratings','merch_items','merch_sales','expenses','song_charts','chart_prefs','chart_defaults','deadlines'];
+const OPTIONAL = ['song_charts','chart_prefs','chart_defaults','deadlines'];      // newer tables: the app still loads if their SQL hasn't been run yet
 const PK = { song_ratings: ['song_id','member_id'], settings: ['id'], chart_prefs: ['member_id','song_id'], chart_defaults: ['member_id'] };
 
 const supa = window.__BAND_MOCK__ ? null :
@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 68;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 69;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -371,8 +371,13 @@ function attention() {
     const unrated = S.songs.filter(s => s.status === 'active' && !myRating(s.id)).length;
     if (unrated) out.push({ sev: 'lo', g: null, text: `You haven't rated ${unrated} active song${unrated > 1 ? 's' : ''}.`, act: 'Rate', href: '#songs' });
   }
+  (S.deadlines || []).filter(d => !d.done && d.due_date).forEach(d => {                        // deadlines you set yourself (Home → Needs attention → + Deadline)
+    const left = days(t, d.due_date), g = d.gig_id ? byId('gigs', d.gig_id) : null;
+    const when = left < 0 ? `Overdue by ${-left} day${left === -1 ? '' : 's'} (was due ${fmtDate(d.due_date)})` : left === 0 ? 'Due today' : left === 1 ? 'Due tomorrow' : `Due ${fmtDate(d.due_date)} · in ${left} days`;
+    out.push({ sev: left <= 3 ? 'hi' : left <= 14 ? 'md' : 'lo', g, dl: d, d: d.due_date, text: when + (g ? ` · ${g.kind === 'practice' ? 'Practice' : g.title}` : '') + (d.notes ? ` — ${d.notes}` : ''), act: 'Deadline' });
+  });
   const rank = { hi: 0, md: 1, lo: 2 };
-  return out.sort((a, b) => rank[a.sev] - rank[b.sev] || ((a.g && a.g.gig_date) || '9').localeCompare((b.g && b.g.gig_date) || '9'));
+  return out.sort((a, b) => rank[a.sev] - rank[b.sev] || (a.d || (a.g && a.g.gig_date) || '9').localeCompare(b.d || (b.g && b.g.gig_date) || '9'));
 }
 
 /* ============================================================ shell */
@@ -600,8 +605,12 @@ function homeView() {
     ${addBtns(false)}
   </section>
   <section class="panel" style="margin-bottom:18px">
-    <div class="row"><h2 class="sec" style="margin:0">Needs attention</h2><span class="spacer"></span><span class="small muted">${att.length} item${att.length === 1 ? '' : 's'}</span></div>
-    <div class="list" style="margin-top:8px">${att.length ? att.slice(0, 14).map(a => `
+    <div class="row"><h2 class="sec" style="margin:0">Needs attention</h2><span class="spacer"></span><span class="small muted">${att.length} item${att.length === 1 ? '' : 's'}</span><button class="btn sm gold" data-act="dl-new">+ Deadline</button></div>
+    <div class="list" style="margin-top:8px">${att.length ? att.slice(0, 14).map(a => a.dl ? `
+      <a class="li" href="#" data-act="dl-edit" data-id="${a.dl.id}" style="align-items:flex-start">
+        <span class="sev ${a.sev}"></span>
+        <div class="grow"><div class="t">⏰ ${esc(a.dl.title)}</div><div class="small muted" style="white-space:normal">${esc(a.text)}</div></div>
+        <span class="btn sm">Deadline</span></a>` : `
       <a class="li" href="${a.act === 'Add practice' ? '#' : (a.href || (a.act === 'Build set' ? (listOf(a.g.id) ? '#setlist/' + listOf(a.g.id).id : '#gig/' + a.g.id) : '#gig/' + a.g.id))}" ${a.act === 'Add practice' ? 'data-act="new-practice"' : ''} style="align-items:flex-start">
         <span class="sev ${a.sev}"></span>
         <div class="grow"><div class="t">${a.g ? esc(a.g.title) : 'Band'}</div><div class="small muted" style="white-space:normal">${esc(a.text)}</div></div>
@@ -926,6 +935,7 @@ function gigRead(g) {
     ${practice ? '' : inquiryPanel(g)}
     ${g.notes ? `<section class="panel"><h2 class="sec">${practice ? 'Plan' : 'Notes'}</h2><p style="margin:0;white-space:pre-wrap">${esc(g.notes)}</p></section>` : ''}
     ${dayOfPanel(g)}
+    ${deadlinePanel(g)}
     ${photosPanel(g, false)}
     ${setlistPanel}
     ${activityFor('gigs', g.id).length ? `<section class="panel"><h2 class="sec">History</h2><div class="list">${activityFor('gigs', g.id).map(a => `<div class="li" style="align-items:flex-start"><div class="grow"><div><b>${esc(a.who || 'Someone')}</b> ${({ created: 'added this', updated: 'edited', restored: 'restored this' })[a.action] || a.action}</div>${(a.changes || []).map(c => `<div class="small muted">${esc(c.f)}: ${esc(c.from)} → ${esc(c.to)}</div>`).join('')}</div><span class="small faint" style="white-space:nowrap">${agoText(a.at)}</span></div>`).join('')}</div></section>` : ''}`;
@@ -2500,6 +2510,26 @@ function clientModal(c) {
     <div class="row" style="margin-top:16px"><button class="btn gold" data-act="client-save" data-id="${c ? c.id : ''}">Save${c ? '' : ' client'}</button><button class="btn" data-act="modal-close">Close</button><span class="spacer"></span>${c ? `<button class="btn danger" data-act="client-delete" data-id="${c.id}">Delete</button>` : ''}</div>
   </div></div>`;
 }
+function deadlineModal(d, gigId) {
+  const k = d || { gig_id: gigId || null }, t = todayIso();
+  const pick = S.gigs.filter(g => !g.deleted_at && (!g.gig_date || g.gig_date >= t || g.id === k.gig_id) && !['passed', 'cancelled'].includes(g.status)).sort((a, b) => (a.gig_date || '9').localeCompare(b.gig_date || '9'));
+  return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(560px,100%)">
+    <div class="row"><h2 class="sec" style="margin:0">${d ? 'Deadline' : 'New deadline'}</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div>
+    <div class="fgrid" style="margin-top:12px">
+      <label class="f w4">What's due<input class="in" data-dl="title" value="${esc(k.title || '')}" placeholder="e.g. Register for the Arts Festival"></label>
+      <label class="f w2">Due date<input class="in" data-dl="due_date" type="date" value="${esc(k.due_date || '')}"></label>
+      <label class="f w2">For (optional)<select class="in" data-dl="gig_id"><option value="">— Band / nothing specific —</option>${pick.map(g => `<option value="${g.id}" ${k.gig_id === g.id ? 'selected' : ''}>${esc(g.gig_date ? mdY(g.gig_date) + ' · ' : '')}${esc(g.kind === 'practice' ? 'Practice' : g.title)}</option>`).join('')}</select></label>
+      <label class="f w4">Notes<input class="in" data-dl="notes" value="${esc(k.notes || '')}" placeholder="Link, fee, who's handling it…"></label>
+    </div>
+    <p class="small muted" style="margin:10px 0 0">Shows under Needs attention: red within 3 days or overdue, gold within 2 weeks, grey before that.</p>
+    <div class="row" style="margin-top:16px"><button class="btn gold" data-act="dl-save" data-id="${d ? d.id : ''}">Save</button>${d ? `<button class="btn" data-act="dl-done" data-id="${d.id}">✓ Mark done</button>` : ''}<button class="btn" data-act="modal-close">Close</button><span class="spacer"></span>${d ? `<button class="btn danger" data-act="dl-delete" data-id="${d.id}">Delete</button>` : ''}</div>
+  </div></div>`;
+}
+function deadlinePanel(g) {                                         // a gig's own open deadlines, on its page
+  const list = (S.deadlines || []).filter(d => d.gig_id === g.id && !d.done).sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+  if (!list.length) return '';
+  return `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Deadlines</h2><span class="spacer"></span><button class="btn sm" data-act="dl-new" data-gig="${g.id}">+ Deadline</button></div><div class="list" style="margin-top:8px">${list.map(d => `<div class="li" data-act="dl-edit" data-id="${d.id}"><div class="grow"><div class="t">${esc(d.title)}</div><div class="s">${d.due_date ? fmtDate(d.due_date) : 'No date'}${d.notes ? ' · ' + esc(d.notes) : ''}</div></div><span class="small ${days(todayIso(), d.due_date) < 0 ? '' : 'muted'}" style="${days(todayIso(), d.due_date) < 0 ? 'color:var(--bad);font-weight:700' : ''}">${days(todayIso(), d.due_date) < 0 ? 'Overdue' : 'in ' + days(todayIso(), d.due_date) + 'd'}</span></div>`).join('')}</div></section>`;
+}
 function openModal(html) { closeModal(); const d = document.createElement('div'); d.id = 'modalRoot'; d.innerHTML = html; document.body.appendChild(d); const f = d.querySelector('input,select'); if (f) f.focus(); }
 function closeModal() { const m = $('#modalRoot'); if (m) m.remove(); }
 
@@ -2663,6 +2693,16 @@ const ACTIONS = {
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
   'client-new': () => openModal(clientModal(null)),
   'client-edit': ({ id }) => openModal(clientModal(byId('clients', id))),
+  'dl-new': ({ el }) => openModal(deadlineModal(null, el.dataset.gig)),
+  'dl-edit': ({ id }) => { const d = (S.deadlines || []).find(x => x.id === id); if (d) openModal(deadlineModal(d)); },
+  'dl-save': async ({ id }) => {
+    const v = {}; $$('[data-dl]').forEach(i => v[i.dataset.dl] = i.value.trim() || null);
+    if (!v.title) return toast('Say what’s due.', true); if (!v.due_date) return toast('Pick a due date.', true);
+    const base = id ? (S.deadlines || []).find(x => x.id === id) : null;
+    if (await guard(() => save('deadlines', { ...(base || { id: uuid(), done: false }), ...v }), 'Deadline saved')) { closeModal(); render(); }
+  },
+  'dl-done': async ({ id }) => { const d = (S.deadlines || []).find(x => x.id === id); if (!d) return; if (await guard(() => save('deadlines', { ...d, done: true, done_at: new Date().toISOString() }), 'Marked done')) { closeModal(); render(); } },
+  'dl-delete': async ({ id }) => { if (!confirm('Delete this deadline?')) return; if (await guard(() => del('deadlines', id), 'Deadline deleted')) { closeModal(); render(); } },
   'client-save': async ({ id }) => {
     const vals = {}; $$('[data-cl]').forEach(i => vals[i.dataset.cl] = i.value.trim() || null);
     if (!vals.org && !vals.contact_name) return toast('Add an organization or a contact name.', true);
