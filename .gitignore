@@ -1,0 +1,9 @@
+# local tooling
+node_modules/
+tools/tests/*_mod*.ts
+
+# your private data: never publish the seed (it holds real client and gig details)
+supabase/02_seed.sql
+
+.DS_Store
+Thumbs.db

@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 63;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 64;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -415,10 +415,16 @@ const cbm = good => UI.cb ? (good ? '✓ ' : '▲ ') : '';
 /* ============================================================ router */
 let UI = { gigFilter: 'upcoming', gigSearch: '', gigYear: 'all', calMonth: null, songFilter: 'active', songSearch: '', songSort: 'title', moneyYear: String(new Date().getFullYear()), selSet: 1, libFilter: 'active', libSearch: '' };
 try { Object.assign(UI, JSON.parse(localStorage.getItem('tfhq-ui') || '{}')); } catch {}
+const isLight = () => document.documentElement.dataset.theme === 'light';
+function applyTheme() {                                                   // Prefs → Appearance: dark (default), light, or follow the device
+  const pick = UI.theme || 'dark', t = pick === 'auto' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : pick;
+  document.documentElement.dataset.theme = t; const m = document.querySelector('meta[name=theme-color]'); if (m) m.setAttribute('content', t === 'light' ? '#f6f1e6' : '#0e0a01');
+}
+try { matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (UI.theme === 'auto') render(); }); } catch {}
 const keepUI = () => { try { const { pubShown, pubSent, ...keep } = UI; localStorage.setItem('tfhq-ui', JSON.stringify(keep)); } catch {} };   // the front-door form state is never saved
 
 function render() {
-  document.body.classList.toggle('cb', !!UI.cb); document.body.classList.toggle('offline', !!S.offline);
+  applyTheme(); document.body.classList.toggle('cb', !!UI.cb); document.body.classList.toggle('offline', !!S.offline);
   document.body.style.setProperty('--hdr', (UI.hdr != null ? UI.hdr : 56) + 'px'); document.body.style.setProperty('--ftr', (UI.fpx != null ? UI.fpx : 14) + 'px');
   document.body.style.setProperty('--tz', UI.tz != null ? UI.tz : (window.innerWidth >= 700 ? 1.12 : 1));
   const app = $('#app');
@@ -1607,11 +1613,11 @@ function cumPanel(ttl, kind, t, yNow) {
   const W = 640, H = 250, pl = 34, pr = 12, pt = 14, pb = 26;
   const x = d => pl + (W - pl - pr) * Math.min(d - 1, 365) / 365, yv = v => pt + (H - pt - pb) * (1 - v / top);
   const stair = (ev, d0, v0) => { let c = v0, p = ''; ev.forEach(g => { c++; p += `H${x(doy(g.gig_date)).toFixed(1)}V${yv(c).toFixed(1)}`; }); return { p, c }; };
-  const pal = ['#ffbf43', '#8fb8e8', '#c9a7ff', '#f3eee4', '#7fd1b9', '#ff9ecb'], td = doy(t);
+  const pal = isLight() ? ['#946100', '#2c67a8', '#7b4fc9', '#1f1709', '#2a8a72', '#c2477f'] : ['#ffbf43', '#8fb8e8', '#c9a7ff', '#f3eee4', '#7fd1b9', '#ff9ecb'], td = doy(t);
   let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:10px" role="img" aria-label="${ttl}">`;
-  for (let v = 0; v <= top; v += step) s += `<line x1="${pl}" x2="${W - pr}" y1="${yv(v)}" y2="${yv(v)}" stroke="rgba(243,238,228,.08)"/><text x="${pl - 6}" y="${yv(v) + 4}" text-anchor="end">${v}</text>`;
-  for (let m = 0; m < 12; m++) { const a = doy(`${yNow}-${String(m + 1).padStart(2, '0')}-01`), b = m < 11 ? doy(`${yNow}-${String(m + 2).padStart(2, '0')}-01`) : 366; s += `<line x1="${x(a)}" x2="${x(a)}" y1="${H - pb}" y2="${H - pb + 4}" stroke="rgba(243,238,228,.25)"/><text x="${(x(a) + x(b)) / 2}" y="${H - 8}" text-anchor="middle">${MON[m]}</text>`; }
-  s += `<line x1="${x(td)}" x2="${x(td)}" y1="${pt}" y2="${H - pb}" stroke="rgba(243,238,228,.3)" stroke-dasharray="2 4"/>`;
+  for (let v = 0; v <= top; v += step) s += `<line x1="${pl}" x2="${W - pr}" y1="${yv(v)}" y2="${yv(v)}" style="stroke:rgba(var(--fg),.08)"/><text x="${pl - 6}" y="${yv(v) + 4}" text-anchor="end">${v}</text>`;
+  for (let m = 0; m < 12; m++) { const a = doy(`${yNow}-${String(m + 1).padStart(2, '0')}-01`), b = m < 11 ? doy(`${yNow}-${String(m + 2).padStart(2, '0')}-01`) : 366; s += `<line x1="${x(a)}" x2="${x(a)}" y1="${H - pb}" y2="${H - pb + 4}" style="stroke:rgba(var(--fg),.25)"/><text x="${(x(a) + x(b)) / 2}" y="${H - 8}" text-anchor="middle">${MON[m]}</text>`; }
+  s += `<line x1="${x(td)}" x2="${x(td)}" y1="${pt}" y2="${H - pb}" style="stroke:rgba(var(--fg),.3)" stroke-dasharray="2 4"/>`;
   series.slice().reverse().forEach(sr => {
     const c = pal[series.indexOf(sr) % pal.length], cur = sr.y === yNow, a = stair(sr.done, 1, 0);
     s += `<path d="M${x(1)} ${yv(0)}${a.p}H${x(cur ? td : 366)}" fill="none" stroke="${c}" stroke-width="${cur ? 3 : 2}" stroke-linejoin="round"><title>${sr.y}: ${sr.done.length}</title></path>`;
@@ -1648,7 +1654,7 @@ function moneyView() {
   <div class="split">
     <div class="stack">
       <section class="panel"><div class="row"><h2 class="sec" style="margin:0">Income by year</h2><span class="spacer"></span>
-        <div class="legend"><span><i style="background:var(--gold)"></i>Income — pay, tips &amp; merch (left)</span><span><i style="background:#8fb8e8"></i>Gigs played (right)</span></div></div>
+        <div class="legend"><span><i style="background:var(--gold)"></i>Income — pay, tips &amp; merch (left)</span><span><i style="background:var(--chart-blue)"></i>Gigs played (right)</span></div></div>
         ${yearChart(byYear)}</section>
       <section class="panel"><h2 class="sec">Gigs ${yrSel === 'all' ? '' : yrSel}</h2><div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Date</th><th>Gig</th><th class="r">Pay</th><th class="r">Tips</th><th class="r">Merch</th><th class="r">Total</th><th class="r hide-sm">$/hr</th><th class="r hide-sm">Each</th></tr></thead>
@@ -1674,14 +1680,14 @@ function moneyView() {
 }
 function yearChart(data) {
   if (!data.length) return '<div class="empty">No played gigs yet.</div>';
-  const inc = d => d.pay + d.tips + d.merch, BLUE = '#8fb8e8';
+  const inc = d => d.pay + d.tips + d.merch, BLUE = isLight() ? '#2c67a8' : '#8fb8e8';
   const nice = m => { const e = Math.pow(10, Math.floor(Math.log10(m || 1))), f = m / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 4 ? 4 : f <= 5 ? 5 : 10) * e; };
   const topI = nice(Math.max(...data.map(inc), 1)), topN = Math.max(4, Math.ceil(Math.max(...data.map(d => d.n), 1) / 4) * 4);
   const W = 640, H = 270, pl = 58, pr = 40, pt = 22, pb = 30, n = data.length;
   const x = i => pl + (W - pl - pr) * (i + .5) / n, yI = v => pt + (H - pt - pb) * (1 - v / topI), yN = v => pt + (H - pt - pb) * (1 - v / topN);
   let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:10px" role="img" aria-label="Income and gig count by year">`;
   for (let k = 0; k <= 4; k++) { const y = pt + (H - pt - pb) * (1 - k / 4);
-    s += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="rgba(243,238,228,.08)"/><text x="${pl - 7}" y="${y + 4}" text-anchor="end" style="fill:var(--gold)">${money(topI * k / 4, true)}</text><text x="${W - pr + 7}" y="${y + 4}" style="fill:${BLUE}">${+(topN * k / 4).toFixed(1)}</text>`; }
+    s += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" style="stroke:rgba(var(--fg),.08)"/><text x="${pl - 7}" y="${y + 4}" text-anchor="end" style="fill:var(--gold)">${money(topI * k / 4, true)}</text><text x="${W - pr + 7}" y="${y + 4}" style="fill:${BLUE}">${+(topN * k / 4).toFixed(1)}</text>`; }
   s += `<text x="${pl - 7}" y="10" text-anchor="end" style="fill:var(--gold);font-weight:700">Income</text><text x="${W - pr + 7}" y="10" style="fill:${BLUE};font-weight:700">Gigs</text>`;
   data.forEach((d, i) => { s += `<text x="${x(i)}" y="${H - 9}" text-anchor="middle">${d.y}</text>`; });
   const line = (f, c, dash) => `<polyline points="${data.map((d, i) => x(i).toFixed(1) + ',' + f(d).toFixed(1)).join(' ')}" fill="none" stroke="${c}" stroke-width="3" stroke-linejoin="round" ${dash ? 'stroke-dasharray="7 5"' : ''}/>`;
@@ -1744,6 +1750,7 @@ function prefsView() {
   const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
   return `${title('Prefs')}
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
+    <label class="f" style="margin-bottom:14px;max-width:320px">Appearance<select class="in" data-theme-pick>${[['dark', 'Dark'], ['light', 'Light'], ['auto', 'Match my device']].map(([v, l]) => `<option value="${v}" ${(UI.theme || 'dark') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
     ${(() => { if (!S.me) return ''; const st = settings(), off = Array.isArray(st.digest_optout) && st.digest_optout.includes(S.me.id);
       return `<div class="f" style="margin-top:14px;max-width:520px"><span>Weekly digest email</span>
@@ -1761,7 +1768,7 @@ function prefsView() {
       <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn sm" data-act="ped-learn" data-v="next">Teach “next”</button><button class="btn sm" data-act="ped-learn" data-v="prev">Teach “previous”</button><button class="btn sm ghost" data-act="ped-reset">Reset</button></div>
       <div class="small muted" id="pedStatus" style="margin-top:8px">Press a pedal switch — everything the iPad receives shows below. If nothing appears, the iPad isn’t getting anything from it (check the pedal’s mode and pairing).${UI.ped && (UI.ped.next || []).length ? ` Learned: next = ${esc(UI.ped.next[0].k)}${(UI.ped.prev || []).length ? ', previous = ' + esc(UI.ped.prev[0].k) : ''}.` : ''}</div>
       <input id="pedFocus" class="in" readonly inputmode="none" autocomplete="off" placeholder="① Tap here, then press the pedal" style="margin-top:8px;max-width:340px">
-      <pre id="pedLog" class="small" style="margin:6px 0 0;padding:8px 10px;background:rgba(243,238,228,.05);border-radius:8px;min-height:3.4em;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace">${esc((S._pedLines || []).join('\n'))}</pre>
+      <pre id="pedLog" class="small" style="margin:6px 0 0;padding:8px 10px;background:rgba(var(--fg),.05);border-radius:8px;min-height:3.4em;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace">${esc((S._pedLines || []).join('\n'))}</pre>
       <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
   </section>`;
@@ -2518,6 +2525,8 @@ document.addEventListener('change', async e => {
   } else if (t.matches('[data-digest-on]')) {
     if (!S.me) return; const st = settings(), cur = Array.isArray(st.digest_optout) ? st.digest_optout : [], next = t.checked ? cur.filter(x => x !== S.me.id) : [...new Set([...cur, S.me.id])];
     if (await guard(() => save('settings', { ...st, digest_optout: next }), t.checked ? 'You’ll get the Monday digest' : 'Digest turned off for you')) render(); else t.checked = !t.checked;
+  } else if (t.matches('[data-theme-pick]')) {
+    UI.theme = t.value; keepUI(); render();
   } else if (t.matches('[data-hdr]')) {
     UI.hdr = Number(t.value); keepUI(); render();
   } else if (t.matches('[data-song-stars]')) {
