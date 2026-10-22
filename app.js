@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 69;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 71;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -122,14 +122,15 @@ async function upsertTolerant(table, rows) {
   throw new Error('Could not save — the database is missing several columns. Run the latest SQL update in Supabase.');
 }
 /* ============================================================ activity log + trash */
-const ACT_TABLES = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
-const ACT_SKIP = new Set(['updated_at', 'created_at', 'deleted_at', 'photos', 'checklist_na', 'sort', 'plan', 'parts', 'ics_token', 'quoted_on', 'invoiced_on', 'deposit_received_on', 'paid_on']);
-const ACT_LABEL = { gig_date: 'Date', start_time: 'Start', end_time: 'End', load_in_time: 'Load-in', soundcheck_time: 'Sound check', deposit_amount: 'Deposit', client_id: 'Client', song_key: 'Key', length_min: 'Length', lead_vox: 'Lead vox', default_set: 'Default set', onsite_contact: 'On-site contact', onsite_phone: 'On-site phone', stage_power: 'Stage & power', food_notes: 'Food', gear_notes: 'Gear', dress_code: 'Dress code', deposit_received: 'Deposit received', paperwork_signed: 'Paperwork signed', invoice_sent: 'Invoice sent', paid_in_full: 'Paid in full', details_sent: 'Details sent', is_opener: 'Good opener', is_closer: 'Good closer', is_encore: 'Good encore', contact_name: 'Contact', org: 'Organization', city_state_zip: 'City/State/ZIP', address1: 'Street', set_count: 'Sets', break_count: 'Breaks', break_min: 'Break (min)' };
+const ACT_TABLES = ['gigs', 'songs', 'setlists', 'clients', 'expenses', 'deadlines'];
+const ACT_SKIP = new Set(['updated_at', 'created_at', 'deleted_at', 'photos', 'checklist_na', 'sort', 'plan', 'parts', 'ics_token', 'quoted_on', 'invoiced_on', 'deposit_received_on', 'paid_on', 'done_at']);
+const ACT_LABEL = { due_date: 'Due', gig_id: 'For', gig_date: 'Date', start_time: 'Start', end_time: 'End', load_in_time: 'Load-in', soundcheck_time: 'Sound check', deposit_amount: 'Deposit', client_id: 'Client', song_key: 'Key', length_min: 'Length', lead_vox: 'Lead vox', default_set: 'Default set', onsite_contact: 'On-site contact', onsite_phone: 'On-site phone', stage_power: 'Stage & power', food_notes: 'Food', gear_notes: 'Gear', dress_code: 'Dress code', deposit_received: 'Deposit received', paperwork_signed: 'Paperwork signed', invoice_sent: 'Invoice sent', paid_in_full: 'Paid in full', details_sent: 'Details sent', is_opener: 'Good opener', is_closer: 'Good closer', is_encore: 'Good encore', contact_name: 'Contact', org: 'Organization', city_state_zip: 'City/State/ZIP', address1: 'Street', set_count: 'Sets', break_count: 'Breaks', break_min: 'Break (min)' };
 const actField = k => ACT_LABEL[k] || (k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '));
 function actValue(k, v) {
   if (v === null || v === undefined || v === '') return '—';
   if (typeof v === 'boolean') return v ? 'yes' : 'no';
   if (k === 'client_id') { const c = byId('clients', v); return c ? (c.org || c.contact_name) : 'a client'; }
+  if (k === 'gig_id') { const g = byId('gigs', v); return g ? (g.kind === 'practice' ? 'Practice' : g.title) : 'a gig'; }
   if (/_date$|_on$/.test(k) && /^\d{4}-\d\d-\d\d/.test(String(v))) return mdY(String(v).slice(0, 10));
   if (['quote', 'paid', 'tips', 'amount', 'deposit_amount'].includes(k) && !isNaN(v)) return money(v);
   const s = typeof v === 'object' ? '…' : String(v); return s.length > 42 ? s.slice(0, 40) + '…' : s;
@@ -140,6 +141,7 @@ function actTitle(table, r) {
   if (table === 'setlists') return slName(r);
   if (table === 'clients') return r.org || r.contact_name || 'Client';
   if (table === 'expenses') return `${money(r.amount, true)} · ${r.note || r.category || 'expense'}`;
+  if (table === 'deadlines') return `Deadline: ${r.title || ''}` + (r.due_date ? ' · due ' + mdY(r.due_date) : '');
   return table;
 }
 function diffRows(old, now) {
@@ -367,10 +369,7 @@ function attention() {
   S.expenses.filter(e => !e.reimbursed && e.paid_by).forEach(e => {
     const m = byId('members', e.paid_by); out.push({ sev: 'lo', g: null, text: `Reimburse ${m ? m.name : 'member'} ${money(e.amount, true)} for ${e.note || e.category}.`, act: 'Money', href: '#money' });
   });
-  if (S.me) {
-    const unrated = S.songs.filter(s => s.status === 'active' && !myRating(s.id)).length;
-    if (unrated) out.push({ sev: 'lo', g: null, text: `You haven't rated ${unrated} active song${unrated > 1 ? 's' : ''}.`, act: 'Rate', href: '#songs' });
-  }
+  // (no "you haven't rated N songs" nag — rating is optional, never a to-do)
   (S.deadlines || []).filter(d => !d.done && d.due_date).forEach(d => {                        // deadlines you set yourself (Home → Needs attention → + Deadline)
     const left = days(t, d.due_date), g = d.gig_id ? byId('gigs', d.gig_id) : null;
     const when = left < 0 ? `Overdue by ${-left} day${left === -1 ? '' : 's'} (was due ${fmtDate(d.due_date)})` : left === 0 ? 'Due today' : left === 1 ? 'Due tomorrow' : `Due ${fmtDate(d.due_date)} · in ${left} days`;
@@ -631,6 +630,13 @@ function untilText(date) {                                          // "Today", 
   const n = days(todayIso(), date); if (!date || n < 0) return '';
   if (n === 0) return 'Today'; if (n === 1) return 'Tomorrow'; if (n < 7) return n + ' days';
   const w = Math.floor(n / 7), r = n % 7; return `${w} wk${w === 1 ? '' : 's'}${r ? ' ' + r + 'd' : ''}`;
+}
+function dlLi(d) {                                                  // a deadline as a list row (calendar lists)
+  const dt = pd(d.due_date), g = d.gig_id ? byId('gigs', d.gig_id) : null, left = days(todayIso(), d.due_date);
+  return `<a class="li dl-li ${d.done ? 'done' : ''}" href="#" data-act="dl-edit" data-id="${d.id}">
+    <div class="date">${dt ? `<small>${MON[dt.getMonth()]}</small><b>${dt.getDate()}</b><small>${String(dt.getFullYear()).slice(2)}</small>` : ''}</div>
+    <div class="grow"><div class="t">⏰ ${esc(d.title)}</div><div class="s">${esc([g ? (g.kind === 'practice' ? 'Practice' : g.title) : '', d.notes].filter(Boolean).join(' · ')) || '&nbsp;'}</div></div>
+    <span class="pill st-deadline">${d.done ? 'Done' : left < 0 ? 'Overdue' : 'Deadline'}</span><div class="amt hide-sm" style="min-width:64px"></div></a>`;
 }
 function gigLi(g, when) {
   const d = pd(g.gig_date);
@@ -1077,12 +1083,14 @@ function calendarSection() {
   const t = todayIso(), st = settings();
   const byDay = {};
   S.gigs.forEach(g => { if (g.gig_date) (byDay[g.gig_date] = byDay[g.gig_date] || []).push(g); });
+  (S.deadlines || []).forEach(d => { if (d.due_date) (byDay[d.due_date] = byDay[d.due_date] || []).push({ _dl: d }); });   // deadlines sit on their due date
   const monthGrid = (y, m) => {
     const start = new Date(y, m, 1 - new Date(y, m, 1).getDay()), cells = [];
     for (let i = 0; i < 42; i++) {
       const d = new Date(start); d.setDate(start.getDate() + i); const k = iso(d);
       if (i >= 35 && d.getMonth() !== m) break;
       const evs = (byDay[k] || []).map(g => {
+        if (g._dl) return `<a class="ev deadline ${g._dl.done ? 'done' : ''}" href="#" data-act="dl-edit" data-id="${g._dl.id}" title="Deadline: ${esc(g._dl.title)}"><span>⏰ ${esc(g._dl.title)}</span></a>`;
         const cls = g.kind === 'practice' ? 'practice' : ['passed','cancelled'].includes(g.status) ? 'dead' : ['inquiry','quoted'].includes(g.status) ? 'lead' : 'gig';
         return `<a class="ev ${cls}" href="#gig/${g.id}" title="${esc(g.title)}"><span>${esc(g.start_time ? g.start_time + ' ' : '')}${esc(g.kind === 'practice' ? 'Practice' : g.title)}</span></a>`;
       }).join('');
@@ -1095,7 +1103,7 @@ function calendarSection() {
   const rangeFrom = iso(months[0]), rangeTo = iso(new Date(last.getFullYear(), last.getMonth() + 1, 0));
   const label = three ? `${months[0].toLocaleDateString('en-US', { month: 'short' })} – ${last.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}` : base.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const feed = `${SUPABASE_URL}/functions/v1/${CAL_FUNCTION}?token=${st.ics_token || ''}`;
-  const rangeList = S.gigs.filter(g => g.gig_date && g.gig_date >= rangeFrom && g.gig_date <= rangeTo).sort((a, b) => a.gig_date.localeCompare(b.gig_date));
+  const rangeList = [...S.gigs.filter(g => g.gig_date && g.gig_date >= rangeFrom && g.gig_date <= rangeTo), ...(S.deadlines || []).filter(d => d.due_date && d.due_date >= rangeFrom && d.due_date <= rangeTo).map(d => ({ _dl: d, gig_date: d.due_date }))].sort((a, b) => a.gig_date.localeCompare(b.gig_date));
   return `<h2 class="sec2">Calendar</h2>
    <div class="row" style="margin-bottom:12px">
      <button class="btn sm" data-act="cal-move" data-v="-1">←</button>
@@ -1105,10 +1113,10 @@ function calendarSection() {
      <span class="spacer"></span>
      <div class="chips"><button class="chip ${three ? '' : 'on'}" data-act="cal-span" data-v="month">Month</button><button class="chip ${three ? 'on' : ''}" data-act="cal-span" data-v="3mo">3 months</button></div>
    </div>
-   <div class="legend" style="margin-bottom:10px"><span><i style="background:var(--gold)"></i>Booked / played</span><span><i style="background:var(--info)"></i>Lead</span><span><i style="background:var(--muted)"></i>Practice</span></div>
+   <div class="legend" style="margin-bottom:10px"><span><i style="background:var(--gold)"></i>Booked / played</span><span><i style="background:var(--info)"></i>Lead</span><span><i style="background:var(--muted)"></i>Practice</span><span><i style="background:var(--dl)"></i>Deadline</span></div>
    <section class="panel" style="padding:10px">${months.map(d => `${three ? `<div class="cal-month">${d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>` : ''}${monthGrid(d.getFullYear(), d.getMonth())}`).join('')}</section>
    <div class="split" style="margin-top:16px">
-     <section class="panel"><h2 class="sec">${three ? 'Next 3 months' : 'This month'}</h2><div class="list">${rangeList.map(gigLi).join('') || `<div class="empty">Nothing ${three ? 'in these months' : 'this month'}.</div>`}</div>
+     <section class="panel"><h2 class="sec">${three ? 'Next 3 months' : 'This month'}</h2><div class="list">${rangeList.map(g => g._dl ? dlLi(g._dl) : gigLi(g)).join('') || `<div class="empty">Nothing ${three ? 'in these months' : 'this month'}.</div>`}</div>
        ${addBtns(false)}</section>
      <section class="panel"><h2 class="sec">Sync to your phone</h2>
        <p class="small muted" style="margin-top:0">Subscribe once and every gig and practice shows up in your own calendar. Gigs start at load-in and run until an hour after the show ends. Updates flow in automatically (Apple refreshes about hourly; Google can take up to a day).</p>
@@ -1794,10 +1802,10 @@ function trashPanel() {
     <div class="list" style="margin-top:8px">${rows.map(({ t, r }) => `<div class="li"><span class="pill" style="color:var(--muted)">${TRASH_LABEL[t]}</span><div class="grow"><div class="t">${esc(trashName(t, r))}</div><div class="s">Deleted ${agoText(r.deleted_at)}${by(t, r)}</div></div><button class="btn sm" data-act="trash-restore" data-t="${t}" data-id="${r.id}">Restore</button><button class="btn sm danger" data-act="trash-purge" data-t="${t}" data-id="${r.id}">Delete forever</button></div>`).join('') || '<div class="empty">Trash is empty.</div>'}</div></section>`;
 }
 function activityPanel() {
-  const f = UI.actFilter || 'all', more = UI.actMore || 40, FILTERS = [['all', 'Everything'], ['gigs', 'Gigs'], ['songs', 'Songs'], ['setlists', 'Setlists'], ['clients', 'Clients'], ['expenses', 'Money']];
+  const f = UI.actFilter || 'all', more = UI.actMore || 40, FILTERS = [['all', 'Everything'], ['gigs', 'Gigs'], ['songs', 'Songs'], ['setlists', 'Setlists'], ['clients', 'Clients'], ['expenses', 'Money'], ['deadlines', 'Deadlines']];
   const all = S.activity.filter(a => f === 'all' || a.entity === f), rows = all.slice(0, more);
   const verb = { created: 'added', updated: 'edited', deleted: 'deleted', restored: 'restored', purged: 'deleted forever' };
-  const link = a => { const t = esc(a.title || a.entity); if (a.action === 'deleted' || a.action === 'purged') return `<b>${t}</b>`; if (a.entity === 'gigs') return `<a href="#gig/${a.entity_id}">${t}</a>`; if (a.entity === 'setlists') return `<a href="#setlist/${a.entity_id}">${t}</a>`; if (a.entity === 'songs') return `<a href="#" data-act="song-edit" data-id="${a.entity_id}">${t}</a>`; return `<b>${t}</b>`; };
+  const link = a => { const t = esc(a.title || a.entity); if (a.action === 'deleted' || a.action === 'purged') return `<b>${t}</b>`; if (a.entity === 'gigs') return `<a href="#gig/${a.entity_id}">${t}</a>`; if (a.entity === 'setlists') return `<a href="#setlist/${a.entity_id}">${t}</a>`; if (a.entity === 'songs') return `<a href="#" data-act="song-edit" data-id="${a.entity_id}">${t}</a>`; if (a.entity === 'deadlines' && (S.deadlines || []).some(d => d.id === a.entity_id)) return `<a href="#" data-act="dl-edit" data-id="${a.entity_id}">${t}</a>`; return `<b>${t}</b>`; };
   let day = '';
   return `<section class="panel" style="grid-column:1/-1"><div class="row"><h2 class="sec" style="margin:0">Activity</h2><span class="small muted">who changed what</span></div>
     ${S._actReady ? '' : '<p class="small" style="color:var(--gold);margin:6px 0 0">The activity log needs the latest SQL update (15).</p>'}
@@ -2702,7 +2710,7 @@ const ACTIONS = {
     if (await guard(() => save('deadlines', { ...(base || { id: uuid(), done: false }), ...v }), 'Deadline saved')) { closeModal(); render(); }
   },
   'dl-done': async ({ id }) => { const d = (S.deadlines || []).find(x => x.id === id); if (!d) return; if (await guard(() => save('deadlines', { ...d, done: true, done_at: new Date().toISOString() }), 'Marked done')) { closeModal(); render(); } },
-  'dl-delete': async ({ id }) => { if (!confirm('Delete this deadline?')) return; if (await guard(() => del('deadlines', id), 'Deadline deleted')) { closeModal(); render(); } },
+  'dl-delete': async ({ id }) => { if (!confirm('Delete this deadline?')) return; const row = (S.deadlines || []).find(x => x.id === id); if (await guard(() => del('deadlines', id), 'Deadline deleted')) { if (row) logActivity('deleted', 'deadlines', row, []); closeModal(); render(); } },
   'client-save': async ({ id }) => {
     const vals = {}; $$('[data-cl]').forEach(i => vals[i.dataset.cl] = i.value.trim() || null);
     if (!vals.org && !vals.contact_name) return toast('Add an organization or a contact name.', true);
