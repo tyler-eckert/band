@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 67;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 68;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -445,7 +445,9 @@ function render() {
   S._route = route;
   after(sec, id);
 }
-window.addEventListener('hashchange', () => { if (S.dirty && !confirmLeave()) return; const rid = (location.hash || '').split('/')[1]; if (S.editGig && S.editGig !== rid) S.editGig = null; if (S.editSl && S.editSl !== rid) S.editSl = null; render(); });
+window.addEventListener('hashchange', () => { if (S.dirty && !confirmLeave()) return; const rid = (location.hash || '').split('/')[1]; if (S.editGig && S.editGig !== rid) S.editGig = null; if (S.editSl && S.editSl !== rid) S.editSl = null;
+  if (UI.editMode && !S.offline && rid) { const rsec = (location.hash || '').slice(1).split('/')[0]; if (rsec === 'gig') S.editGig = rid; else if (rsec === 'setlist') S.editSl = rid; }   // Admin → Edit mode: open straight into Edit
+  render(); });
 function confirmLeave() { S.dirty = false; return true; }
 
 /* ============================================================ login */
@@ -1581,9 +1583,9 @@ function songForm(s) {
       <label class="f w2">Genre<input class="in" data-s="genre" list="genreList" value="${esc(s.genre || '')}"><datalist id="genreList">${[...new Set(S.songs.map(x => x.genre).filter(Boolean))].sort().map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
       <label class="f">Energy (1–5)<select class="in" data-s="energy"><option value="">—</option>${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${s.energy === n ? 'selected' : ''}>${n} ${['', 'mellow', 'easy', 'groove', 'lively', 'barn-burner'][n]}</option>`).join('')}</select></label>
       <label class="f">Tuning<select class="in" data-s="tuning">${['Standard', 'Half step down', 'Drop D', 'Other'].map(x => `<option ${(s.tuning || 'Standard') === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
-      <label class="f">Good opener?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_opener" ${s.is_opener ? 'checked' : ''}> Works to open a set</span></label>
-      <label class="f">Good closer?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_closer" ${s.is_closer ? 'checked' : ''}> Works to close a set</span></label>
-      <label class="f">Good encore?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_encore" ${s.is_encore ? 'checked' : ''}> Works as an encore</span></label>
+      <label class="f">Good opener?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_opener" ${s.is_opener ? 'checked' : ''}> Good opener</span></label>
+      <label class="f">Good closer?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_closer" ${s.is_closer ? 'checked' : ''}> Good closer</span></label>
+      <label class="f">Good encore?<span class="check" style="padding:9px 0"><input type="checkbox" data-s="is_encore" ${s.is_encore ? 'checked' : ''}> Good encore</span></label>
       ${f('year', 'Year', 'number')}${f('added_on', 'Learned', 'date')}
       <label class="f w4">Notes<input class="in" data-s="comment" value="${esc(s.comment || '')}" placeholder="e.g. tuning half step down"></label>
     </div>
@@ -1824,6 +1826,7 @@ function adminView() {
   const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}"></label>`;
   return `${title('Admin')}
   <div class="small faint" style="margin:-6px 0 14px">App version ${APP_V} · ${displayInfo()} · <a href="#" data-act="app-refresh">Update app files now</a></div>
+  <label class="check" style="margin:0 0 16px;align-items:flex-start"><input type="checkbox" data-edit-mode ${UI.editMode ? 'checked' : ''}><span><b>Edit mode</b><div class="small muted" style="margin-top:2px">Gigs, practices, setlists and songs open straight into Edit when you tap them. Saved on this device.</div></span></label>
   <div class="grid g2">
     <section class="panel"><div class="row"><h2 class="sec" style="margin:0">Clients</h2><span class="spacer"></span><button class="btn sm gold" data-act="client-new">+ New client</button></div>
       <div class="list" style="margin-top:8px">${S.clients.slice().sort((a, b) => (a.org || a.contact_name || '').localeCompare(b.org || b.contact_name || '')).map(c => { const n = S.gigs.filter(g => g.client_id === c.id).length; return `<div class="li" data-act="client-edit" data-id="${c.id}" style="cursor:pointer"><div class="grow"><div class="t">${esc(c.org || c.contact_name)}</div><div class="s">${esc([c.contact_name, c.email, c.phone].filter(Boolean).join(' · '))}</div></div><span class="small muted">${esc(c.code || '')} · ${n} gig${n === 1 ? '' : 's'}</span></div>`; }).join('') || '<div class="empty">No clients yet — add one here, or from a gig.</div>'}</div>
@@ -2549,6 +2552,8 @@ document.addEventListener('change', async e => {
   } else if (t.matches('[data-digest-on]')) {
     if (!S.me) return; const st = settings(), cur = Array.isArray(st.digest_optout) ? st.digest_optout : [], next = t.checked ? cur.filter(x => x !== S.me.id) : [...new Set([...cur, S.me.id])];
     if (await guard(() => save('settings', { ...st, digest_optout: next }), t.checked ? 'You’ll get the Monday digest' : 'Digest turned off for you')) render(); else t.checked = !t.checked;
+  } else if (t.matches('[data-edit-mode]')) {
+    UI.editMode = t.checked; keepUI(); toast(t.checked ? 'Edit mode on — things open straight into Edit' : 'Edit mode off');
   } else if (t.matches('[data-theme-pick]')) {
     UI.theme = t.value; keepUI(); render();
   } else if (t.matches('[data-hdr]')) {
@@ -2800,7 +2805,7 @@ const ACTIONS = {
   'sl-del': async ({ g }) => { const id = g.id, label = slName(g); S.editSl = null; if (await deleteWithUndo('setlists', id, label)) location.hash = '#setlists'; else render(); },
   // songs
   rate: async ({ id, v }) => { if (!S.me) return; const cur = myRating(id); const val = Number(v); if (cur === val) { await guard(() => api.remove('song_ratings', { song_id: id, member_id: S.me.id })); S.song_ratings = S.song_ratings.filter(r => !(r.song_id === id && r.member_id === S.me.id)); } else await guard(() => save('song_ratings', { song_id: id, member_id: S.me.id, rating: val })); render(); },
-  'song-edit': ({ id, e }) => { if (e.target.closest('.stars')) return; openModal(songModal(byId('songs', id))); },
+  'song-edit': ({ id, e }) => { if (e.target.closest('.stars')) return; openModal(songModal(byId('songs', id), UI.editMode && !S.offline)); },
   'song-edit-mode': ({ id }) => openModal(songModal(byId('songs', id), true)),
   'song-view': ({ id }) => openModal(songModal(byId('songs', id))),
   'song-new': () => openModal(songModal({ status: 'learning', added_on: todayIso() })),
