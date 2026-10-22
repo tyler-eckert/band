@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 65;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 67;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1537,7 +1537,7 @@ function songsView() {
   <section class="panel"><div class="tbl-wrap"><table class="tbl">
     <thead><tr>${th('title', 'Song')}${th('key', 'Key')}${th('length', 'Len', 'r')}${th('bpm', 'BPM', 'r hide-sm')}${th('lead', 'Lead vox', 'hide-sm')}${th('genre', 'Genre', 'hide-sm')}${th('mine', 'Your rating')}${th('avg', 'Band', 'hide-sm')}${th('plays', 'Plays', 'r')}${th('last', 'Last played', 'hide-sm')}</tr></thead>
     <tbody>${rows.map(s => { const r = ratingsFor(s.id); return `<tr class="click" data-act="song-edit" data-id="${s.id}">
-      <td><b>${esc(s.title)}</b>${s.is_opener ? ' <span class="pill st-confirmed">Opener</span>' : ''}${s.is_closer ? ' <span class="pill st-confirmed">Closer</span>' : ''}${s.is_encore ? ' <span class="pill st-confirmed">Encore</span>' : ''}${chartFor(s.id) ? ' <span class="small" style="color:var(--gold)" title="You have a PDF chart for this song">PDF</span>' : ''}<div class="small muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></td>
+      <td><b>${esc(s.title)}</b>${chartFor(s.id) ? ' <span class="small" style="color:var(--gold)" title="You have a PDF chart for this song">PDF</span>' : ''}<div class="small muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></td>
       <td class="num">${esc(s.song_key || '')}${s.capo ? `<div class="small muted">capo ${s.capo}</div>` : ''}</td>
       <td class="r num">${mins(s.length_min)}</td>
       <td class="r num hide-sm">${s.bpm || '<span class="faint">—</span>'}</td>
@@ -1558,12 +1558,13 @@ function songView(s) {                                              // condensed
   const rates = S.song_ratings.filter(x => x.song_id === s.id), avg = avgRating(s.id);
   return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop data-songview>
     <div class="row" style="align-items:flex-start;gap:10px"><div class="grow"><h2 class="sec" style="margin:0;font-size:24px">${esc(s.title)}</h2><div class="muted">${esc(s.artist || '')}${s.year ? ' · ' + s.year : ''}</div></div>${(() => { const r = chartFor(s.id); return r ? `<button class="btn gold" data-act="chart-open" data-id="${r.chart.id}">Open chart</button>` : ''; })()}<button class="btn" data-act="song-edit-mode" data-id="${s.id}">Edit</button><button class="btn ghost" data-act="modal-close">✕</button></div>
-    <div class="row" style="margin:10px 0 4px;gap:6px;flex-wrap:wrap"><span class="pill" style="color:var(--muted)">${cap(s.status || 'active')}</span>${flags.map(f => `<span class="pill st-confirmed">${f}</span>`).join('')}</div>
+    <div class="row" style="margin:10px 0 4px;gap:6px;flex-wrap:wrap"><span class="pill" style="color:var(--muted)">${cap(s.status || 'active')}</span></div>
     <div class="kv" style="margin-top:12px">${kv('Key', s.song_key ? esc(s.song_key) + (s.capo ? ` · capo ${s.capo}` : '') : '')}${kv('BPM', s.bpm ? String(s.bpm) : '')}${kv('Length', s.length_min ? mins(s.length_min) : '')}${kv('Tuning', esc(s.tuning || 'Standard'))}${kv('Starts it', esc(s.starter || ''))}${kv('Lead vox', esc(s.lead_vox || ''))}${kv('Genre', esc(s.genre || ''))}${kv('Energy', s.energy ? '▮'.repeat(s.energy) + ` <span class="small muted">${s.energy}/5</span>` : '')}${kv('Plays', String(st.plays || 0))}${kv('Last played', st.last ? mdY(st.last) : '—')}</div>
     ${s.comment ? `<p style="margin:14px 0 0;white-space:pre-wrap">${esc(s.comment)}</p>` : ''}
     ${parts ? `<h2 class="sec" style="margin-top:16px">Who plays what</h2><div class="row small" style="gap:6px 18px;flex-wrap:wrap">${parts}</div>` : ''}
     <h2 class="sec" style="margin-top:16px">Charts (PDF)</h2>${chartBox(s, true)}
     <h2 class="sec" style="margin-top:16px">Band ratings${avg ? ` <span class="small muted" style="font-weight:400">avg ${avg.toFixed(1)}</span>` : ''}</h2><div class="row small" style="gap:6px 18px;flex-wrap:wrap">${ms.map(m => { const r = rates.find(x => x.member_id === m.id); return `<span>${esc(m.name)} <span class="stars ro">${starsRO(r && r.rating)}</span></span>`; }).join('')}</div>
+    ${flags.length ? `<div class="row" style="margin-top:16px;gap:6px;flex-wrap:wrap">${flags.map(f => `<span class="pill st-confirmed">${f}</span>`).join('')}</div>` : ''}
   </div></div>`;
 }
 function songForm(s) {
