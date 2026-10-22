@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 64;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 65;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -2150,9 +2150,9 @@ async function refreshNow(manual) {
 })();
 
 /* ============================================================ pencil markup */
-const GMK = { on: false, tool: 'pen', color: '#d11a2a', strokes: [], undo: [], key: null, songId: null, path: null, cur: null, pending: null, timer: null, scroll: null };
+const GMK = { on: false, tool: 'pen', color: '#111111', strokes: [], undo: [], key: null, songId: null, path: null, cur: null, pending: null, timer: null, scroll: null };
 const PEN_COLORS = [['#111111', 'Black'], ['#d11a2a', 'Red'], ['#1d4ed8', 'Blue']];
-const r3 = n => Math.round(n * 1000) / 1000;
+const r3 = n => Math.round(n * 1000) / 1000, r4 = n => Math.round(n * 10000) / 10000;
 function segDist(px, py, ax, ay, bx, by) {                          // distance from a point to a line segment
   const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy, t = l ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l)) : 0;
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
@@ -2163,9 +2163,21 @@ function drawStroke(ctx, s, w, h) {                                // points are
   if (s.t === 'hl') {
     ctx.globalAlpha = .38; ctx.lineWidth = s.w * w; ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h)); ctx.stroke();
   } else if (pts.length === 1) { ctx.beginPath(); ctx.arc(pts[0][0] * w, pts[0][1] * h, s.w * w * (.5 + pts[0][2]) / 2, 0, 7); ctx.fill(); }
-  else for (let i = 1; i < pts.length; i++) { ctx.lineWidth = s.w * w * (.5 + pts[i][2]); ctx.beginPath(); ctx.moveTo(pts[i - 1][0] * w, pts[i - 1][1] * h); ctx.lineTo(pts[i][0] * w, pts[i][1] * h); ctx.stroke(); }
+  else { for (let i = 1; i < pts.length; i++) penSeg(ctx, s, w, h, i); penTail(ctx, s, w, h); }
   ctx.restore();
 }
+/* smooth pen: each piece is a curve between the midpoints of neighbouring samples (bent toward the sample itself), so
+   the line flows instead of zig-zagging between points. penSeg(i) only needs points up to i, so it can be drawn live. */
+function penSeg(ctx, s, w, h, i) {
+  const p = s.pts, a = p[i - 1], b = p[i], m0 = i > 1 ? [(p[i - 2][0] + a[0]) / 2, (p[i - 2][1] + a[1]) / 2] : a, m1 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  ctx.lineWidth = s.w * w * (.5 + a[2]); ctx.beginPath(); ctx.moveTo(m0[0] * w, m0[1] * h); ctx.quadraticCurveTo(a[0] * w, a[1] * h, m1[0] * w, m1[1] * h); ctx.stroke();
+}
+function penTail(ctx, s, w, h) {                                   // the last half-piece, from the final midpoint to where the pen lifted
+  const p = s.pts, n = p.length; if (n < 2) return; const a = p[n - 2], b = p[n - 1];
+  ctx.lineWidth = s.w * w * (.5 + b[2]); ctx.beginPath(); ctx.moveTo((a[0] + b[0]) / 2 * w, (a[1] + b[1]) / 2 * h); ctx.lineTo(b[0] * w, b[1] * h); ctx.stroke();
+}
+let gmRaf = 0;
+function gmRedrawSoon(pg) { if (gmRaf) return; gmRaf = requestAnimationFrame(() => { gmRaf = 0; gmRedraw(pg); }); }   // at most one full repaint per screen frame
 function gmRedraw(only) {
   (GM.pgs || []).forEach((P, k) => {
     if (only != null && only !== k) return; const ctx = P.ov.getContext && P.ov.getContext('2d'); if (!ctx) return;
@@ -2229,12 +2241,23 @@ function gmPtr(e) {
     if (GMK.scroll && e.pointerId === GMK.scroll.id) { if (GMK.cur || Date.now() - (GMK.lastPen || 0) < 900) { GMK.scroll = null; return; } const dy = e.clientY - GMK.scroll.y, dx = e.clientX - GMK.scroll.x; if (!GMK.scroll.go && Math.hypot(dx, dy) < 8) return; GMK.scroll.go = true; view.scrollTop = GMK.scroll.top - dy; view.scrollLeft = GMK.scroll.left - dx; return; }
     const c = GMK.cur; if (!c || e.pointerId !== c.id) return; if (!e._first) e.preventDefault && e.preventDefault();
     const evs = (e.getCoalescedEvents && e.getCoalescedEvents().length) ? e.getCoalescedEvents() : [e];
+    const pen = c.stroke && c.stroke.t === 'pen', from = c.stroke ? c.stroke.pts.length : 0;
     for (const q of evs) {
-      const x = r3((q.clientX - c.r.left) / c.r.width), y = r3((q.clientY - c.r.top) / c.r.height), p = Math.round((q.pressure || .5) * 100) / 100;
-      if (c.stroke) c.stroke.pts.push([x, y, p]);
+      const x = r4((q.clientX - c.r.left) / c.r.width), y = r4((q.clientY - c.r.top) / c.r.height);   // 4 decimals: 3 left visible stair-steps when zoomed in
+      if (c.stroke) {
+        const pts = c.stroke.pts, last = pts[pts.length - 1], raw = q.pressure || .5;
+        if (last && Math.abs(x - last[0]) * c.P.w < .35 && Math.abs(y - last[1]) * c.P.h < .35) continue;   // ignore sub-pixel jitter
+        pts.push([x, y, Math.round((last ? last[2] * .6 + raw * .4 : raw) * 100) / 100]);   // ease pressure so the width doesn't flicker
+      }
       else { const rad = 0.03; GMK.strokes = GMK.strokes.filter(s => { if (s.pg !== c.pg) return true; const hit = s.pts.some(([sx, sy], i) => { const a = s.pts[i - 1] || [sx, sy]; return segDist(x * c.P.w, y * c.P.h, a[0] * c.P.w, a[1] * c.P.h, sx * c.P.w, sy * c.P.h) < rad * c.P.w; }); if (hit) c.removed.push(s); return !hit; }); }
     }
-    gmRedraw(c.pg);
+    if (pen && c.stroke.pts.length > from) {                     // pen: draw just the new pieces on top — no full repaint while writing
+      const ctx = c.P.ov.getContext && c.P.ov.getContext('2d'), s = c.stroke; if (!ctx) return;
+      ctx.save(); ctx.setTransform(c.P.dpr, 0, 0, c.P.dpr, 0, 0); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = s.c; ctx.fillStyle = s.c;
+      if (from === 0) { const p0 = s.pts[0]; ctx.beginPath(); ctx.arc(p0[0] * c.P.w, p0[1] * c.P.h, s.w * c.P.w * (.5 + p0[2]) / 2, 0, 7); ctx.fill(); }
+      for (let i = Math.max(1, from); i < s.pts.length; i++) penSeg(ctx, s, c.P.w, c.P.h, i);
+      ctx.restore();
+    } else if (!pen) gmRedrawSoon(c.pg);                          // highlighter / eraser: repaint once per frame
   } else if (e.type === 'pointerup' || e.type === 'pointercancel') {
     if (GMK.scroll && e.pointerId === GMK.scroll.id) { const moved = GMK.scroll.go; GMK.scroll = null; if (moved) gmSnap(); return; }
     const c = GMK.cur; if (!c || e.pointerId !== c.id) return; GMK.cur = null;
