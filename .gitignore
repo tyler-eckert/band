@@ -7,3 +7,5 @@ supabase/02_seed.sql
 
 .DS_Store
 Thumbs.db
+supabase/20_deadlines.sql
+supabase/functions/band-digest/index.ts

@@ -51,6 +51,7 @@ document.documentElement.setAttribute('data-theme',t);if(t==='light')document.qu
   --gold-fill:#ffbf43;         /* gold behind dark text (buttons, toasts) — stays bright in both themes */
   --plate-mid:#e9a52a; --plate-end:#3a2805;
   --quoted:#c9a7ff; --chart-blue:#8fb8e8;
+  --dl:#4fd1c5;                /* deadlines (calendar, lists) */
 }
 /* ---------- light theme ---------- */
 html[data-theme="light"]{
@@ -65,6 +66,7 @@ html[data-theme="light"]{
   --drawer:rgba(251,248,242,.98); --offline:#fdeec7;
   --plate-mid:#ffd27a; --plate-end:#fbe7b8;
   --quoted:#7b4fc9; --chart-blue:#2c67a8;
+  --dl:#0f7d72;
   color-scheme:light;
 }
 html[data-theme="light"] .in,html[data-theme="light"] select.in,html[data-theme="light"] textarea.in,html[data-theme="light"] .mail pre{background:#fff}
@@ -231,6 +233,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .cal .ev{font-size:11px;line-height:1.25;padding:3px 5px;border-radius:4px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-left:3px solid currentColor;background:rgba(var(--fg),.06)}
 .cal .ev.gig{color:var(--gold)} .cal .ev.practice{color:var(--muted)} .cal .ev.lead{color:var(--info)} .cal .ev.dead{color:var(--faint);text-decoration:line-through}
 .cal .ev span{color:var(--cream)}
+.cal .ev.deadline{color:var(--dl)} .cal .ev.deadline.done{opacity:.5;text-decoration:line-through}
+.st-deadline{color:var(--dl)} .dl-li .date b{color:var(--dl)} .dl-li .date{border-color:var(--dl)} .dl-li.done{opacity:.55}
 
 /* ---------- setlist ---------- */
 .sets{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
@@ -520,6 +524,6 @@ if(h)document.documentElement.style.setProperty('--top-h',h.offsetHeight+'px');}
 new MutationObserver(m).observe(app,{childList:true});addEventListener('resize',m);addEventListener('orientationchange',m);m();})();</script>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=69"></script>
+<script src="app.js?v=71"></script>
 </body>
 </html>
