@@ -487,7 +487,23 @@ body.song-dragging{-webkit-user-select:none;user-select:none;cursor:grabbing}
 .song.editable .n{text-align:center}
 .who-menu{display:flex;flex-direction:column;gap:6px;min-width:176px}
 .who-menu .btn{width:100%;text-align:left}
-#gigMode.gm-doc #gmPenBtn,#gigMode.gm-doc [data-gm=list]{display:none}
+#gigMode.gm-doc #gmPenBtn,#gigMode.gm-doc [data-gm=list],#gigMode.gm-doc #gmMetroBtn{display:none}
+/* ---------- gig-mode metronome ---------- */
+.gm-metro{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;background:var(--raise2);border-bottom:1px solid var(--line-soft)}
+.gm-metro[hidden]{display:none}
+.gm-pulse{width:46px;height:46px;border-radius:50%;border:3px solid var(--gold);flex:none;background:transparent}
+.gm-pulse.beat{animation:gmBeat .2s ease-out}
+.gm-pulse.acc{animation:gmAcc .26s ease-out}
+@keyframes gmBeat{from{background:var(--gold-fill);transform:scale(1.12)}to{background:transparent;transform:scale(1)}}
+@keyframes gmAcc{from{background:var(--gold-fill);transform:scale(1.28);box-shadow:0 0 0 8px rgba(255,191,67,.35)}to{background:transparent;transform:scale(1);box-shadow:0 0 0 0 rgba(255,191,67,0)}}
+.gm-bpm{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:70px;min-height:46px;border-radius:12px;border:1px solid var(--gold);background:rgba(255,191,67,.1);color:var(--gold);font-family:inherit;line-height:1;padding:2px 8px}
+.gm-bpm b{font-size:24px;font-weight:900;font-variant-numeric:tabular-nums}.gm-bpm small{font-size:10px;font-weight:700;letter-spacing:.1em}
+.gm-mgrp{display:inline-flex;gap:4px;flex-wrap:wrap}
+.gm-sel{min-height:38px;border-radius:10px;border:1px solid var(--line);background:rgba(var(--fg),.08);color:var(--cream);font:700 14px/1 var(--body);padding:0 8px}
+.gm-vol{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}.gm-vol input{width:110px;accent-color:var(--gold)}
+.gm-mnote{font-size:12px;color:var(--muted)}
+@media (max-width:520px){ .gm-top{gap:5px;padding-left:8px;padding-right:8px} .gm-top .gm-btn{min-width:38px;padding:0 7px;font-size:15px} }   /* phones: a little more room for the song title */
+.gm-link{background:none;border:0;color:var(--gold);font:inherit;font-weight:700;text-decoration:underline;padding:0;cursor:pointer}
 /* ---------- the front door (signed out) ---------- */
 .login .fm.pub{max-width:520px}
 .login .fm.wide{max-width:760px}
@@ -524,6 +540,6 @@ if(h)document.documentElement.style.setProperty('--top-h',h.offsetHeight+'px');}
 new MutationObserver(m).observe(app,{childList:true});addEventListener('resize',m);addEventListener('orientationchange',m);m();})();</script>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=73"></script>
+<script src="app.js?v=74"></script>
 </body>
 </html>
