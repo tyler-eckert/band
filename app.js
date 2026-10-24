@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 73;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 74;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -2311,11 +2311,11 @@ function openGigMode(seq, lid, opts = {}) {
   d.innerHTML = `<div class="gm-top"><button class="gm-btn" data-gm="exit" aria-label="Exit gig mode">✕</button>
     <div class="gm-title"><div class="gm-t1" id="gmT1"></div><div class="gm-t2"><span id="gmT2"></span><span id="gmPg"></span> <span id="gmPre"></span></div></div>
     <button class="gm-awake" data-gm="awake" id="gmAwake"></button>
-    <button class="gm-btn" data-gm="pen" id="gmPenBtn" aria-label="Pencil markup">Pen</button><button class="gm-btn" data-gm="zoom-out" aria-label="Smaller">A−</button><button class="gm-btn" data-gm="zoom-in" aria-label="Bigger">A+</button>${GM.preview ? '' : '<button class="gm-btn" data-gm="list" aria-label="Song list">☰</button>'}</div>
+    <button class="gm-btn" data-gm="metro" id="gmMetroBtn" aria-label="Metronome">♩</button><button class="gm-btn" data-gm="pen" id="gmPenBtn" aria-label="Pencil markup">Pen</button><button class="gm-btn" data-gm="zoom-out" aria-label="Smaller">A−</button><button class="gm-btn" data-gm="zoom-in" aria-label="Bigger">A+</button>${GM.preview ? '' : '<button class="gm-btn" data-gm="list" aria-label="Song list">☰</button>'}</div>
     <input id="gmKeys" class="gm-keys" readonly inputmode="none" autocomplete="off" autocapitalize="off" aria-hidden="true" tabindex="-1">
-    <div class="gm-tools" id="gmTools" hidden></div><div class="gm-view" id="gmView"></div><div class="gm-bottom" id="gmBottom"></div><div class="gm-drawer" id="gmDrawer" hidden></div>`;
+    <div class="gm-tools" id="gmTools" hidden></div><div class="gm-metro" id="gmMetro" hidden></div><div class="gm-view" id="gmView"></div><div class="gm-bottom" id="gmBottom"></div><div class="gm-drawer" id="gmDrawer" hidden></div>`;
   document.body.appendChild(d);
-  d.addEventListener('click', gmClick); document.addEventListener('keydown', gmKey, true); document.addEventListener('visibilitychange', gmVis);
+  d.addEventListener('click', gmClick); d.addEventListener('input', e => { if (e.target.matches('[data-gm-vol]')) { UI.metro = { ...metroPrefs(), vol: Number(e.target.value) }; keepUI(); } }); d.addEventListener('change', e => { const k = e.target.dataset && e.target.dataset.gmSel; if (k) { UI.metro = { ...metroPrefs(), [k]: k === 'beats' ? Number(e.target.value) : e.target.value }; keepUI(); metroPanel(); } }); document.addEventListener('keydown', gmKey, true); document.addEventListener('visibilitychange', gmVis);
   d.addEventListener('selectstart', e => e.preventDefault()); d.setAttribute('tabindex', '-1');
   const focusKeys = () => { const k = $('#gmKeys'); if (GM.open && k && document.activeElement !== k) { try { k.focus({ preventScroll: true }); } catch {} } };
   d.addEventListener('pointerup', () => setTimeout(focusKeys, 30)); d.addEventListener('click', () => setTimeout(focusKeys, 30)); d.addEventListener('focusout', () => setTimeout(focusKeys, 120));
@@ -2328,7 +2328,82 @@ function openGigMode(seq, lid, opts = {}) {
   gmWake(); gmShow(GM.i); if (!GM.preview) gmPrefetch();
   marksPull([...new Set(seq.map(x => x.song && x.song.id).filter(Boolean))]).then(ch => { if (ch && GM.open) gmMarksLoad(GM.tok); });
 }
+
+/* ============================================================ metronome (gig mode → ♩)
+   Click track, a pulsing light, or both. Starts at the song's saved BPM; −/+ or Tap changes it on the fly.
+   Timing runs on the Web Audio clock (scheduled a little ahead), so it stays steady even when the page is busy. */
+const METRO = { on: false, open: false, bpm: null, beat: 0, next: 0, timer: null, raf: null, ctx: null, queue: [], taps: [], over: {} };
+const metroPrefs = () => Object.assign({ mode: 'both', beats: 4, vol: 0.8 }, UI.metro || {});
+const metroSong = () => (GM.seq[GM.i] || {}).song || {};
+const metroClamp = v => Math.max(30, Math.min(300, Math.round(v)));
+function metroCtx() {
+  if (!METRO.ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; METRO.ctx = new AC(); try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {} }
+  if (METRO.ctx.state === 'suspended') { try { METRO.ctx.resume(); } catch {} }
+  return METRO.ctx;
+}
+function metroClick(t, accent) {
+  const p = metroPrefs(); if (p.mode === 'light') return;
+  const c = METRO.ctx, o = c.createOscillator(), g = c.createGain(), peak = Math.max(0.001, p.vol) * (accent ? 1 : 0.6);
+  o.frequency.value = accent ? 1600 : 1000; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + 0.06);
+}
+function metroSched() {
+  const c = METRO.ctx, beats = metroPrefs().beats;
+  while (METRO.next < c.currentTime + 0.12) { const accent = beats > 1 && METRO.beat % beats === 0; metroClick(METRO.next, accent); METRO.queue.push({ t: METRO.next, accent }); METRO.beat++; METRO.next += 60 / METRO.bpm; }
+  METRO.timer = setTimeout(metroSched, 25);
+}
+function metroDraw() {
+  const c = METRO.ctx; let hit = null; while (METRO.queue.length && METRO.queue[0].t <= c.currentTime) hit = METRO.queue.shift();
+  if (hit && metroPrefs().mode !== 'sound') { const dot = $('#gmPulse'); if (dot) { dot.classList.remove('beat', 'acc'); void dot.offsetWidth; dot.classList.add(hit.accent ? 'acc' : 'beat'); } }
+  METRO.raf = requestAnimationFrame(metroDraw);
+}
+function metroStart() {
+  const c = metroCtx(); if (!c) return toast('This device can’t run the metronome.', true);
+  if (!METRO.bpm) METRO.bpm = 100; METRO.beat = 0; METRO.queue = []; METRO.next = c.currentTime + 0.08; METRO.on = true;
+  clearTimeout(METRO.timer); cancelAnimationFrame(METRO.raf); metroSched(); metroDraw(); metroPanel();
+}
+function metroStop() { METRO.on = false; clearTimeout(METRO.timer); cancelAnimationFrame(METRO.raf); METRO.queue = []; const d = $('#gmPulse'); if (d) d.classList.remove('beat', 'acc'); metroPanel(); }
+function metroSet(v) { METRO.bpm = metroClamp(v); const s = metroSong(); if (s.id) METRO.over[s.id] = METRO.bpm; metroPanel(); }   // a change sticks to this song until gig mode closes
+function metroForSong() {                                          // called when the song changes
+  const s = metroSong(); METRO.bpm = (s.id && METRO.over[s.id]) || s.bpm || METRO.bpm || 100; METRO.beat = 0;
+  metroPanel();
+}
+function metroTap() {
+  const now = performance.now(); METRO.taps = METRO.taps.filter(t => now - t < 2500); METRO.taps.push(now);
+  if (METRO.taps.length >= 2) { const gaps = METRO.taps.slice(1).map((t, i) => t - METRO.taps[i]); metroSet(60000 / (gaps.reduce((a, b) => a + b, 0) / gaps.length)); } else metroPanel();
+}
+function metroPanel() {
+  const el = $('#gmMetro'); if (!el) return; el.hidden = !METRO.open; const b = $('#gmMetroBtn'); if (b) b.classList.toggle('on', METRO.on || METRO.open);
+  if (!METRO.open) return;
+  const p = metroPrefs(), s = metroSong(), changed = s.id && s.bpm !== METRO.bpm;
+  const sel = (k, opts) => `<select class="gm-sel" data-gm-sel="${k}">${opts.map(([v, l]) => `<option value="${v}" ${p[k] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  el.innerHTML = `<div class="gm-pulse" id="gmPulse"></div>
+    <button class="gm-tb" data-gm="m-step" data-v="-5">−5</button><button class="gm-tb" data-gm="m-step" data-v="-1">−1</button>
+    <button class="gm-bpm" data-gm="m-type" aria-label="Type a BPM"><b>${METRO.bpm || '—'}</b><small>BPM</small></button>
+    <button class="gm-tb" data-gm="m-step" data-v="1">+1</button><button class="gm-tb" data-gm="m-step" data-v="5">+5</button>
+    <button class="gm-tb" data-gm="m-tap">Tap${METRO.taps.length === 1 ? '…' : ''}</button>
+    <button class="gm-tb ${METRO.on ? 'done' : 'on'}" data-gm="m-play" style="min-width:84px">${METRO.on ? '■ Stop' : '▶ Start'}</button>
+    <span class="gm-mgrp">${sel('mode', [['both', 'Click + light'], ['sound', 'Click only'], ['light', 'Light only']])}${sel('beats', [[1, 'No accent'], [2, 'Accent every 2'], [3, 'Accent every 3'], [4, 'Accent every 4'], [6, 'Accent every 6']])}</span>
+    ${p.mode === 'light' ? '' : `<label class="gm-vol">Vol<input type="range" min="0.05" max="1" step="0.05" value="${p.vol}" data-gm-vol></label>`}
+    <span class="gm-mnote">${s.bpm ? `Saved: ${s.bpm} BPM` : 'No BPM saved for this song'}${changed && !GM.preview ? ` · <button class="gm-link" data-gm="m-save">Save ${METRO.bpm} to song</button>` : ''}</span>`;
+}
+async function metroSave() {
+  const s = metroSong(); if (!s.id || !METRO.bpm) return; const base = byId('songs', s.id) || s;
+  const saved = await guard(() => save('songs', { ...base, bpm: METRO.bpm }), `${s.title}: ${METRO.bpm} BPM saved`); if (!saved) return;
+  GM.seq.forEach(x => { if (x.song && x.song.id === s.id) x.song = saved; }); delete METRO.over[s.id]; metroForSong();
+}
+function metroAct(a, el) {
+  if (a === 'metro') { METRO.open = !METRO.open; metroPanel(); }
+  else if (a === 'm-play') { if (METRO.on) metroStop(); else metroStart(); }
+  else if (a === 'm-step') metroSet((METRO.bpm || 100) + Number(el.dataset.v));
+  else if (a === 'm-type') { const v = prompt('BPM for this song', METRO.bpm || ''); if (v && !isNaN(v)) metroSet(Number(v)); }
+  else if (a === 'm-tap') metroTap();
+  else if (a === 'm-save') metroSave();
+  else return false;
+  return true;
+}
 function closeGigMode(quiet) {
+  metroStop(); METRO.open = false; METRO.over = {};
   if (GM.onResize) { window.removeEventListener('resize', GM.onResize); GM.onResize = null; }
   mediaOff(); gmMarksFlush(); GMK.on = false; GMK.cur = null;
   const d = $('#gigMode'); if (d) d.remove();
@@ -2423,6 +2498,7 @@ function mediaOff() {
 }
 function gmClick(e) {
   const el = e.target.closest('[data-gm]'); if (!el) return; const a = el.dataset.gm;
+  if (metroAct(a, el)) return;
   if (a === 'exit') closeGigMode();
   else if (a === 'next') gmShow(GM.i + 1); else if (a === 'prev') gmShow(GM.i - 1);
   else if (a === 'pen') gmPenToggle();
@@ -2445,7 +2521,7 @@ function gmShow(i, toEnd) {
   const cur = GM.seq[i], s = cur.song || {}, inSet = GM.seq.filter(x => x.set === cur.set), pos = inSet.indexOf(cur) + 1;
   $('#gmT1').textContent = s.title || '(deleted song)';
   $('#gmT2').textContent = GM.preview ? (GM.isDoc ? 'Training document' : songLabel(s)) : `Set ${cur.set} · ${pos} of ${inSet.length} · song ${i + 1}/${GM.seq.length}`;
-  $('#gmBottom').innerHTML = gmBottom(); gmBadge(); gmLoadChart();
+  $('#gmBottom').innerHTML = gmBottom(); gmBadge(); metroForSong(); gmLoadChart();
 }
 function gmBottom() {
   const cur = GM.seq[GM.i], nxt = GM.seq[GM.i + 1], s = cur.song || {};
