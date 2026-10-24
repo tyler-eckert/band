@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 71;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 72;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -913,7 +913,7 @@ function setlistSets(L, compact) {
     return `<section class="panel set"><div class="row"><h3>Set ${n}</h3>${slot && slot.from ? `<span class="small muted">${slot.from}–${slot.to}</span>` : ''}<span class="spacer"></span><span class="small muted num">${hm(dur[n])}</span></div>
       ${its.map((i, k) => { const s = byId('songs', i.song_id) || { title: '(deleted song)' }; const c = changes(prev, s); prev = s;
         const warn = compact ? '' : [c.tuning ? `<span style="color:var(--bad)">${cbm(false)}retune → ${esc(s.tuning || 'Standard')}</span>` : '', ...c.inst.map(x => `<span style="color:var(--gold)">${esc(x.who)}: ${esc(x.to)}</span>`)].filter(Boolean).join(' · ');
-        return `<div class="song"><span class="n">${k + 1}</span><div style="min-width:0"><div class="nm">${esc(s.title)}${s.is_encore ? ' <span class="small" style="color:var(--gold)">encore</span>' : ''}</div>
+        return `<div class="song"><span class="n">${k + 1}</span><div style="min-width:0"><div class="nm">${esc(s.title)}</div>
           <div class="meta">${esc(songLabel(s))}${compact ? '' : ' · ' + mins(s.length_min) + (s.lead_vox ? ' · ' + esc(s.lead_vox) : '')}</div>${warn ? `<div class="meta">⇄ ${warn}</div>` : ''}</div><span></span></div>${i.note ? `<div class="snote">${esc(i.note)}</div>` : ''}`; }).join('')}
       ${brk && brk.kind === 'break' && n < plan.sets ? `<div class="small muted" style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">Break · ${brk.dur} min${brk.from ? ` · ${brk.from}–${brk.to}` : ''}</div>` : ''}
     </section>`; }).join('')}</div>`;
