@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 72;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 73;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -667,7 +667,7 @@ function gigsView() {
   rows.sort((a, b) => (a.gig_date || '9999').localeCompare(b.gig_date || '9999') * (asc ? 1 : -1));
   const years = [...new Set(S.gigs.map(g => yearOf(g.gig_date)).filter(Boolean))].sort((a, b) => b - a);
   const counts = k => S.gigs.filter({ leads: g => isGig(g) && ['inquiry','quoted'].includes(g.status), booked: g => isGig(g) && g.status === 'confirmed' }[k]).length;
-  return `${title('Gigs')}
+  return `${title('Gigs & Practices')}
    ${addBtns(true, '0px')}
    <div class="row" style="margin-bottom:14px">
      <div class="chips">${[['upcoming','Upcoming'],['leads',`Leads (${counts('leads')})`],['booked',`Booked (${counts('booked')})`],['played','Played'],['practices','Practices'],['passed','Passed'],['all','All']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-act="gig-filter" data-v="${k}">${l}</button>`).join('')}</div>
