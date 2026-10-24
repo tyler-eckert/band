@@ -9,3 +9,4 @@ supabase/02_seed.sql
 Thumbs.db
 supabase/20_deadlines.sql
 supabase/functions/band-digest/index.ts
+supabase/21_member_gig_view.sql
