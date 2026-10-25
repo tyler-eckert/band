@@ -10,7 +10,7 @@ const CAL_FUNCTION = 'band-calendar';                                        // 
 /* ============================================================ data layer */
 const TABLES = ['members','settings','payees','clients','gigs','songs','setlists','setlist_items','song_ratings','merch_items','merch_sales','expenses','song_charts','chart_prefs','chart_defaults','deadlines','attn_snooze'];
 const OPTIONAL = ['song_charts','chart_prefs','chart_defaults','deadlines','attn_snooze'];      // newer tables: the app still loads if their SQL hasn't been run yet
-const PK = { attn_snooze: ['key'], song_ratings: ['song_id','member_id'], settings: ['id'], chart_prefs: ['member_id','song_id'], chart_defaults: ['member_id'] };
+const PK = { attn_snooze: ['key'], push_subs: ['endpoint'], song_ratings: ['song_id','member_id'], settings: ['id'], chart_prefs: ['member_id','song_id'], chart_defaults: ['member_id'] };
 
 const supa = window.__BAND_MOCK__ ? null :
   (window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { db: { schema: 'band' } }) : null);
@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 78;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 79;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
