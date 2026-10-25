@@ -10,3 +10,8 @@ Thumbs.db
 supabase/20_deadlines.sql
 supabase/functions/band-digest/index.ts
 supabase/21_member_gig_view.sql
+supabase/functions/band-push/index.ts
+supabase/22_snooze_and_push.sql
+supabase/functions/band-calendar/index.ts
+supabase/functions/band-calendar/index.ts
+supabase/functions/band-calendar/index.ts

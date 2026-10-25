@@ -2,7 +2,7 @@
    Keeps the app's own files on the device so it opens with no signal. Network first, so a new
    version always wins when you're online; the saved copy is used when the network is down or slow.
    Band data (Supabase) is never touched here — the app keeps its own offline copy of that. */
-const CACHE = 'tfhq-app-v1';
+const CACHE = 'tfhq-app-v1';   // sw v2: adds push notifications
 const KEEP_VERSIONS = 2;                       // per file name, so a half-updated page can still find its matching script
 const EXTRA_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com', 'cdnjs.cloudflare.com'];
 const SLOW_MS = 3500;
@@ -61,3 +61,20 @@ async function prune(cache, req) {
   const same = (await cache.keys()).filter(k => { const x = new URL(k.url); return x.origin === u.origin && x.pathname === u.pathname; });
   await Promise.all(same.slice(0, Math.max(0, same.length - KEEP_VERSIONS)).map(k => cache.delete(k)));
 }
+
+/* Phone notifications (sent by the band-push Edge Function): show them, and open the right page when tapped. */
+self.addEventListener('push', e => {
+  let d = {}; try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Trailer Folk HQ', {
+    body: d.body || '', tag: d.tag || undefined, data: { url: d.url || './' }, icon: 'hq-icon-192.png', badge: 'hq-icon-192.png'
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || './', self.registration.scope).href;
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const w of wins) { if ('focus' in w) { try { await w.navigate(url); } catch {} return w.focus(); } }
+    return self.clients.openWindow(url);
+  })());
+});

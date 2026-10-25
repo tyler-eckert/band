@@ -8,9 +8,9 @@ const SUPABASE_KEY = 'sb_publishable_GP4wq5bwrQ3M0qCTwQei4A_Lsk_zBcK';   // publ
 const CAL_FUNCTION = 'band-calendar';                                        // Edge Function name for the live calendar feed
 
 /* ============================================================ data layer */
-const TABLES = ['members','settings','payees','clients','gigs','songs','setlists','setlist_items','song_ratings','merch_items','merch_sales','expenses','song_charts','chart_prefs','chart_defaults','deadlines'];
-const OPTIONAL = ['song_charts','chart_prefs','chart_defaults','deadlines'];      // newer tables: the app still loads if their SQL hasn't been run yet
-const PK = { song_ratings: ['song_id','member_id'], settings: ['id'], chart_prefs: ['member_id','song_id'], chart_defaults: ['member_id'] };
+const TABLES = ['members','settings','payees','clients','gigs','songs','setlists','setlist_items','song_ratings','merch_items','merch_sales','expenses','song_charts','chart_prefs','chart_defaults','deadlines','attn_snooze'];
+const OPTIONAL = ['song_charts','chart_prefs','chart_defaults','deadlines','attn_snooze'];      // newer tables: the app still loads if their SQL hasn't been run yet
+const PK = { attn_snooze: ['key'], song_ratings: ['song_id','member_id'], settings: ['id'], chart_prefs: ['member_id','song_id'], chart_defaults: ['member_id'] };
 
 const supa = window.__BAND_MOCK__ ? null :
   (window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { db: { schema: 'band' } }) : null);
@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 77;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 78;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -324,6 +324,12 @@ const myRating = id => S.me ? (S.song_ratings.find(r => r.song_id === id && r.me
 const songLabel = s => `${s.song_key || '?'}${s.capo ? ' · capo ' + s.capo : ''}`;
 
 /* ----- “needs attention” — the admin queue ----- */
+/* every item gets a stable key (its gig + the words of the reminder, ignoring numbers and punctuation) so it can be snoozed or
+   marked "not needed". The band-digest email builds the same keys, so a snoozed item stays out of the email too. */
+const attnKey = a => a.dl ? 'dl:' + a.dl.id : ((a.g && a.g.id) || 'band') + ':' + String(a.text || '').toLowerCase().replace(/days?/g, '').replace(/[^a-z]+/g, '');
+const snoozeOf = key => (S.attn_snooze || []).find(z => z.key === key);
+const isSnoozed = key => { const z = snoozeOf(key); return !!z && (!z.until || z.until > todayIso()); };
+const liveAttention = () => attention().filter(a => !isSnoozed(a.key));
 function attention() {
   const st = settings(), t = todayIso(), out = [];
   const add = (sev, g, text, act, href) => out.push({ sev, g, text, act, href });
@@ -376,6 +382,7 @@ function attention() {
     out.push({ sev: left <= 3 ? 'hi' : left <= 14 ? 'md' : 'lo', g, dl: d, d: d.due_date, text: when + (g ? ` · ${g.kind === 'practice' ? 'Practice' : g.title}` : '') + (d.notes ? ` — ${d.notes}` : ''), act: 'Deadline' });
   });
   const rank = { hi: 0, md: 1, lo: 2 };
+  out.forEach(a => a.key = attnKey(a));
   return out.sort((a, b) => rank[a.sev] - rank[b.sev] || (a.d || (a.g && a.g.gig_date) || '9').localeCompare(b.d || (b.g && b.g.gig_date) || '9'));
 }
 
@@ -587,7 +594,7 @@ function homeView() {
   const isPrac = g => g.kind === 'practice';
   const gNow = thru(yr, isPlayed), gPrev = thru(yr - 1, isPlayed), pNow = thru(yr, isPrac), pPrev = thru(yr - 1, isPrac);
   const vs = (a, b) => `${a > b ? '▲ ' : a < b ? '▼ ' : ''}${b} at this point last year${a === b ? ' (even)' : ' (' + (a > b ? '+' : '−') + Math.abs(a - b) + ')'}`;
-  const att = attention();
+  const attAll = attention(), att = attAll.filter(a => !isSnoozed(a.key)), snoozed = attAll.filter(a => isSnoozed(a.key));
   const n = next ? days(t, next.gig_date) : null;
   const nd = nextGig ? days(t, nextGig.gig_date) : null;
   return `
@@ -605,16 +612,8 @@ function homeView() {
   </section>
   <section class="panel" style="margin-bottom:18px">
     <div class="row"><h2 class="sec" style="margin:0">Needs attention</h2><span class="spacer"></span><span class="small muted">${att.length} item${att.length === 1 ? '' : 's'}</span><button class="btn sm gold" data-act="dl-new">+ Deadline</button></div>
-    <div class="list" style="margin-top:8px">${att.length ? att.slice(0, 14).map(a => a.dl ? `
-      <a class="li" href="#" data-act="dl-edit" data-id="${a.dl.id}" style="align-items:flex-start">
-        <span class="sev ${a.sev}"></span>
-        <div class="grow"><div class="t">⏰ ${esc(a.dl.title)}</div><div class="small muted" style="white-space:normal">${esc(a.text)}</div></div>
-        <span class="btn sm">Deadline</span></a>` : `
-      <a class="li" href="${a.act === 'Add practice' ? '#' : (a.href || (a.act === 'Build set' ? (listOf(a.g.id) ? '#setlist/' + listOf(a.g.id).id : '#gig/' + a.g.id) : '#gig/' + a.g.id))}" ${a.act === 'Add practice' ? 'data-act="new-practice"' : ''} style="align-items:flex-start">
-        <span class="sev ${a.sev}"></span>
-        <div class="grow"><div class="t">${a.g ? esc(a.g.title) : 'Band'}</div><div class="small muted" style="white-space:normal">${esc(a.text)}</div></div>
-        <span class="btn sm">${a.act}</span></a>`).join('') : '<div class="empty">All caught up. Nothing needs you right now.</div>'}
-    </div>
+    ${att.length ? attnGroups(att) : '<div class="empty" style="margin-top:8px">All caught up. Nothing needs you right now.</div>'}
+    ${snoozed.length ? `<div class="row" style="margin-top:10px"><button class="btn sm ghost" data-act="att-show-snoozed">${UI.showSnoozed ? 'Hide' : 'Show'} ${snoozed.length} snoozed / not needed</button></div>${UI.showSnoozed ? `<div class="list">${snoozed.map(a => { const z = snoozeOf(a.key); return `<div class="li"><span class="sev ${a.sev}"></span><div class="grow"><div class="t">${esc(attnLabel(a))}</div><div class="s" style="white-space:normal">${esc(a.text)}</div></div><span class="small faint" style="white-space:nowrap">${z.until ? 'until ' + mdY(z.until) : 'not needed'}</span><button class="btn sm" data-act="att-unsnooze" data-k="${esc(a.key)}">Bring back</button></div>`; }).join('')}</div>` : ''}` : ''}
   </section>
   <div class="grid g4">
     ${kpi(gNow, `Gigs played in ${yr}`, vs(gNow, gPrev))}
@@ -1769,7 +1768,7 @@ function merchItemModal(i) {
 /* ============================================================ settings / band */
 function prefsView() {
   const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
-  return `${title('Prefs')}
+  return foldPanels(`${title('Prefs')}
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="f" style="margin-bottom:14px;max-width:320px">Appearance<select class="in" data-theme-pick>${[['dark', 'Dark'], ['light', 'Light'], ['auto', 'Match my device']].map(([v, l]) => `<option value="${v}" ${(UI.theme || 'dark') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
@@ -1777,9 +1776,7 @@ function prefsView() {
       return `<div class="f" style="margin-top:14px;max-width:520px"><span>Weekly digest email</span>
       <label class="check" style="align-items:flex-start"><input type="checkbox" data-digest-on ${off ? '' : 'checked'}><span>Email me the Monday digest<div class="small muted">This week’s gigs and practices, what needs attention, and (for managers) money owed. Sent to ${esc(S.me.email || 'the email on your roster entry — add it under Admin → Roster')}.</div></span></label>
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="digest-preview">Preview</button><button class="btn sm" data-act="digest-test">Send me a test now</button></div></div>`; })()}
-    <label class="f" style="margin-top:14px;max-width:320px">Header position (iPad)<select class="in" data-hdr>${[[10, 'Snug'], [32, 'Medium'], [56, 'Low'], [80, 'Lowest']].map(([v, l]) => `<option value="${v}" ${(UI.hdr != null ? UI.hdr : 56) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-    <label class="f" style="margin-top:14px;max-width:320px">Footer position (iPad)<select class="in" data-ftr>${[[0, 'Lowest'], [6, 'Low'], [14, 'Medium'], [24, 'High'], [34, 'Highest']].map(([v, l]) => `<option value="${v}" ${(UI.fpx != null ? UI.fpx : 14) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-    <label class="f" style="margin-top:14px;max-width:320px">Text size<select class="in" data-text-size><option value="auto" ${UI.tz == null ? 'selected' : ''}>Auto (a bit larger on iPad)</option><option value="1" ${UI.tz === 1 ? 'selected' : ''}>Normal</option><option value="1.12" ${UI.tz === 1.12 ? 'selected' : ''}>Large</option><option value="1.25" ${UI.tz === 1.25 ? 'selected' : ''}>Extra large</option></select></label>
+    ${(() => { const cur = fitOf(); return `<label class="f" style="margin-top:14px;max-width:320px">Screen fit<select class="in" data-text-size>${cur === 'custom' ? '<option value="custom" selected>Custom (your earlier settings)</option>' : ''}${Object.entries(FITS).map(([k, f]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${f.label}</option>`).join('')}</select></label><div class="small muted" style="margin-top:4px">Sets text size and how much room the header and tab bar leave on an iPad.</div>`; })()}
     ${(() => { if (!S.me) return ''; const cur = S.chart_defaults.find(d => d.member_id === S.me.id), ids = new Set(S.song_charts.filter(c => c.member_id !== S.me.id).map(c => c.member_id)); if (cur) ids.add(cur.use_member_id); const mine = S.song_charts.filter(c => c.member_id === S.me.id).length;
       return `<label class="f" style="margin-top:14px">When I don’t have my own chart for a song, use…<select class="in" data-chart-default><option value="">Nobody’s (leave it blank)</option>${[...ids].map(id => `<option value="${id}" ${cur && cur.use_member_id === id ? 'selected' : ''}>${esc((byId('members', id) || {}).name || 'Bandmate')}’s chart</option>`).join('')}</select></label><div class="small muted" style="margin-top:4px">You have ${mine} chart${mine === 1 ? '' : 's'} of your own. You can still pick a different chart song by song from the song’s page.</div>`; })()}
   </section>
@@ -1792,7 +1789,12 @@ function prefsView() {
       <pre id="pedLog" class="small" style="margin:6px 0 0;padding:8px 10px;background:rgba(var(--fg),.05);border-radius:8px;min-height:3.4em;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace">${esc((S._pedLines || []).join('\n'))}</pre>
       <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
-  </section>`;
+  </section>
+  ${mgr ? `<section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Phone notifications</h2>
+    <p class="small muted" style="margin-top:0">Managers get a buzz on this device when a website inquiry comes in, and a morning heads-up when a deadline is due or overdue. Turn it on separately on each phone or iPad. On iPhone/iPad it only works in the Home Screen app (iOS 16.4 or newer).</p>
+    <div class="small" id="pushState" style="margin:6px 0 10px">Checking…</div>
+    <div class="row"><button class="btn sm gold" data-act="push-on">Turn on for this device</button><button class="btn sm" data-act="push-test">Send me a test</button><button class="btn sm ghost" data-act="push-off">Turn off here</button></div>
+  </section>` : ''}`, 'prefs', ['Page-turner pedal', 'Phone notifications']);
 }
 function trashPanel() {
   const rows = TRASHABLE.flatMap(t => S._trash[t].map(r => ({ t, r }))).sort((a, b) => (b.r.deleted_at || '').localeCompare(a.r.deleted_at || ''));
@@ -1842,7 +1844,7 @@ function inqProblems(cfg) {
 function adminView() {
   const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
   const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}"></label>`;
-  return `${title('Admin')}
+  return foldPanels(`${title('Admin')}
   <div class="small faint" style="margin:-6px 0 14px">App version ${APP_V} · ${displayInfo()} · <a href="#" data-act="app-refresh">Update app files now</a></div>
   <label class="check" style="margin:0 0 16px;align-items:flex-start"><input type="checkbox" data-edit-mode ${UI.editMode ? 'checked' : ''}><span><b>Edit mode</b><div class="small muted" style="margin-top:2px">Gigs, practices, setlists and songs open straight into Edit when you tap them. Saved on this device.</div></span></label>
   <div class="grid g2">
@@ -1887,7 +1889,7 @@ function adminView() {
     </section>` : ''}
     ${trashPanel()}
     ${activityPanel()}
-  </div>`;
+  </div>`, 'adm');
 }
 
 /* ============================================================ PDFs */
@@ -2339,6 +2341,9 @@ function openGigMode(seq, lid, opts = {}) {
    By default the light fills the screen (no chart) and the click drops off after 20 seconds — a count-in, not a click for the whole song.
    Timing runs on the Web Audio clock (scheduled a little ahead), so it stays steady even when the page is busy. Works offline. */
 const METRO = { on: false, open: false, used: false, bpm: null, beat: 0, next: 0, endT: 0, timer: null, raf: null, ctx: null, queue: [], taps: [], over: {} };
+/* Prefs → Screen fit: one choice instead of separate header / footer / text-size settings */
+const FITS = { auto: { label: 'Auto (recommended)', hdr: null, fpx: null, tz: null }, compact: { label: 'Compact', hdr: 32, fpx: 6, tz: 1 }, comfortable: { label: 'Comfortable', hdr: 56, fpx: 14, tz: 1.12 }, large: { label: 'Large text', hdr: 56, fpx: 14, tz: 1.25 } };
+const fitOf = () => (Object.entries(FITS).find(([, f]) => (UI.hdr ?? null) === f.hdr && (UI.fpx ?? null) === f.fpx && (UI.tz ?? null) === f.tz) || ['custom'])[0];
 const metroPrefs = () => Object.assign({ mode: 'light', beats: 4, vol: 0.8, stopAfter: 20, view: 'big', autoNext: 'on' }, UI.metro || {});
 if (UI.metro && !UI.metro.v2) { UI.metro = { ...UI.metro, mode: 'light', v2: 1 }; keepUI(); }   // light only became the default
 const metroSong = () => (GM.seq[GM.i] || {}).song || {};
@@ -2612,6 +2617,33 @@ function clientModal(c) {
     <div class="row" style="margin-top:16px"><button class="btn gold" data-act="client-save" data-id="${c ? c.id : ''}">Save${c ? '' : ' client'}</button><button class="btn" data-act="modal-close">Close</button><span class="spacer"></span>${c ? `<button class="btn danger" data-act="client-delete" data-id="${c.id}">Delete</button>` : ''}</div>
   </div></div>`;
 }
+
+/* Needs attention, grouped by gig: "Trimble Dinner · Fri Oct 30 — 6 things", each with ⋯ to snooze or mark not needed */
+const attnLabel = a => a.dl ? '⏰ ' + a.dl.title : a.g ? (a.g.kind === 'practice' ? 'Practice' : a.g.title) : 'Band';
+const attnHref = a => a.act === 'Add practice' ? '#' : (a.href || (a.act === 'Build set' ? (listOf(a.g.id) ? '#setlist/' + listOf(a.g.id).id : '#gig/' + a.g.id) : '#gig/' + a.g.id));
+function attnGroups(att) {
+  const rank = { hi: 0, md: 1, lo: 2 }, groups = new Map();
+  att.forEach(a => { const k = a.g ? a.g.id : a.dl ? 'deadlines' : 'band'; if (!groups.has(k)) groups.set(k, { g: a.g, k, items: [] }); groups.get(k).items.push(a); });
+  const list = [...groups.values()].sort((x, y) => Math.min(...x.items.map(a => rank[a.sev])) - Math.min(...y.items.map(a => rank[a.sev])) || ((x.g && x.g.gig_date) || '9').localeCompare((y.g && y.g.gig_date) || '9'));
+  const row = a => `<div class="att-i"><span class="sev ${a.sev}"></span>
+      ${a.dl ? `<a class="grow att-t" href="#" data-act="dl-edit" data-id="${a.dl.id}"><b>⏰ ${esc(a.dl.title)}</b> <span class="muted">${esc(a.g ? a.text.replace(' · ' + (a.g.kind === 'practice' ? 'Practice' : a.g.title), '') : a.text)}</span></a><a class="btn sm" href="#" data-act="dl-edit" data-id="${a.dl.id}">Deadline</a>`
+        : `<a class="grow att-t" href="${attnHref(a)}" ${a.act === 'Add practice' ? 'data-act="new-practice"' : ''}>${esc(a.text)}</a><a class="btn sm" href="${attnHref(a)}" ${a.act === 'Add practice' ? 'data-act="new-practice"' : ''}>${a.act}</a>`}
+      <button class="ib att-more" data-act="att-snooze" data-k="${esc(a.key)}" aria-label="Snooze or hide" title="Snooze / not needed">⋯</button></div>`;
+  return `<div class="att">${list.map(G => `<div class="att-g">
+    <div class="att-h">${G.g ? `<a href="#gig/${G.g.id}">${esc(G.g.kind === 'practice' ? 'Practice' : G.g.title)}</a><span class="small muted">${G.g.gig_date ? fmtDate(G.g.gig_date) : 'No date'}</span>` : `<b>${G.k === 'deadlines' ? 'Deadlines' : 'Band'}</b>`}<span class="spacer"></span><span class="small muted">${G.items.length} thing${G.items.length === 1 ? '' : 's'}</span></div>
+    ${G.items.map(row).join('')}</div>`).join('')}</div>`;
+}
+function snoozeModal(key) {
+  const a = attention().find(x => x.key === key); if (!a) return '';
+  const opt = (days, l) => `<button class="btn" data-act="att-snooze-set" data-k="${esc(key)}" data-v="${days}">${l}</button>`;
+  return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(480px,100%)">
+    <div class="row"><h2 class="sec" style="margin:0">Snooze this?</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close">✕</button></div>
+    <p style="margin:10px 0 4px"><b>${esc(attnLabel(a))}</b></p><p class="small muted" style="margin:0 0 14px">${esc(a.text)}</p>
+    <div class="row">${opt(1, 'Until tomorrow')}${opt(3, '3 days')}${opt(7, '1 week')}${opt(14, '2 weeks')}</div>
+    <div class="row" style="margin-top:12px"><button class="btn danger" data-act="att-snooze-set" data-k="${esc(key)}" data-v="0">Not needed — hide it for good</button></div>
+    <p class="small faint" style="margin:12px 0 0">Hidden for everyone in the band (and from the Monday email). Bring it back any time from “Show snoozed” under Needs attention.</p>
+  </div></div>`;
+}
 function deadlineModal(d, gigId) {
   const k = d || { gig_id: gigId || null }, t = todayIso();
   const pick = S.gigs.filter(g => !g.deleted_at && (!g.gig_date || g.gig_date >= t || g.id === k.gig_id) && !['passed', 'cancelled'].includes(g.status)).sort((a, b) => (a.gig_date || '9').localeCompare(b.gig_date || '9'));
@@ -2632,11 +2664,70 @@ function deadlinePanel(g) {                                         // a gig's o
   if (!list.length) return '';
   return `<section class="panel"><div class="row"><h2 class="sec" style="margin:0">Deadlines</h2><span class="spacer"></span><button class="btn sm" data-act="dl-new" data-gig="${g.id}">+ Deadline</button></div><div class="list" style="margin-top:8px">${list.map(d => `<div class="li" data-act="dl-edit" data-id="${d.id}"><div class="grow"><div class="t">${esc(d.title)}</div><div class="s">${d.due_date ? fmtDate(d.due_date) : 'No date'}${d.notes ? ' · ' + esc(d.notes) : ''}</div></div><span class="small ${days(todayIso(), d.due_date) < 0 ? '' : 'muted'}" style="${days(todayIso(), d.due_date) < 0 ? 'color:var(--bad);font-weight:700' : ''}">${days(todayIso(), d.due_date) < 0 ? 'Overdue' : 'in ' + days(todayIso(), d.due_date) + 'd'}</span></div>`).join('')}</div></section>`;
 }
+/* turn each top-level <section class="panel"> into a collapsible <details> (open/closed is remembered on this device) */
+
+/* ============================================================ phone notifications (Web Push)
+   The band-push Edge Function holds the keys and sends; this device just subscribes and stores where to reach it. */
+const pushUrl = q => `${SUPABASE_URL}/functions/v1/band-push?token=${settings().ics_token || ''}&${q}`;
+const pushOk = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+async function pushSub() { try { const r = await navigator.serviceWorker.ready; return await r.pushManager.getSubscription(); } catch { return null; } }
+async function pushState() {
+  const el = $('#pushState'); if (!el) return;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches));
+  if (!pushOk()) { el.innerHTML = ios && !standalone ? '⚠ Open HQ from its Home Screen icon (Share → Add to Home Screen) to use notifications.' : '⚠ This browser can’t do notifications.'; return; }
+  if (Notification.permission === 'denied') { el.innerHTML = '⚠ Notifications are blocked for HQ — turn them on in this device’s Settings → Notifications.'; return; }
+  const sub = await pushSub(); el.innerHTML = sub ? '<span style="color:var(--ok)">● On for this device</span>' : '<span class="muted">○ Off on this device</span>';
+}
+const b64u = s => { const p = '='.repeat((4 - s.length % 4) % 4), b = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+async function pushOn() {
+  if (!pushOk()) return pushState();
+  if (!S.me) return toast('Sign in first.', true);
+  const perm = await Notification.requestPermission(); if (perm !== 'granted') { pushState(); return toast('Notifications weren’t allowed.', true); }
+  try {
+    const kr = await fetch(pushUrl('event=key')); if (!kr.ok) throw new Error(kr.status === 404 ? 'The band-push function isn’t deployed yet.' : 'Couldn’t get the push key (' + kr.status + ').');
+    const { publicKey } = await kr.json(); if (!publicKey) throw new Error('The VAPID keys aren’t set on band-push yet.');
+    const reg = await navigator.serviceWorker.ready; let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(publicKey) });
+    const j = sub.toJSON();
+    await api.upsert('push_subs', [{ endpoint: j.endpoint, member_id: S.me.id, p256dh: j.keys.p256dh, auth: j.keys.auth, device: navigator.userAgent.slice(0, 160) }]);
+    toast('Notifications on for this device');
+  } catch (e) { toast(e.message || 'Couldn’t turn notifications on.', true); }
+  pushState();
+}
+async function pushOff() {
+  const sub = await pushSub(); if (sub) { try { await api.remove('push_subs', { endpoint: sub.endpoint }); } catch {} try { await sub.unsubscribe(); } catch {} }
+  toast('Notifications off for this device'); pushState();
+}
+async function pushTest() {
+  if (!S.me) return; const sub = await pushSub(); if (!sub) return toast('Turn notifications on for this device first.', true);
+  try { const r = await fetch(pushUrl('event=test&member=' + S.me.id)), j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Push error ' + r.status); toast(j.sent ? 'Test sent — watch for it' : 'No devices to send to'); }
+  catch (e) { toast(e.message || 'Couldn’t send the test.', true); }
+}
+function foldPanels(html, prefix, only) {
+  const t = document.createElement('template'); t.innerHTML = html;
+  [...t.content.querySelectorAll('section.panel')].forEach(sec => {
+    if (sec.parentElement && sec.parentElement.closest && sec.parentElement.closest('section.panel,details.fold')) return;
+    const h2 = sec.querySelector('h2.sec'); if (!h2) return;
+    const title = h2.textContent.trim(); if (only && !only.includes(title)) return;
+    const key = prefix + '-' + title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const d = document.createElement('details'); d.className = sec.className + ' fold'; if (sec.getAttribute('style')) d.setAttribute('style', sec.getAttribute('style')); if (sec.id) d.id = sec.id;
+    d.dataset.fold = key; if (foldOpen(key)) d.open = true;
+    const sum = document.createElement('summary'), head = h2.parentElement !== sec ? h2.parentElement : null, hh = h2.cloneNode(true); hh.style.margin = '0'; sum.appendChild(hh);
+    if (head) head.querySelectorAll(':scope > .small.muted').forEach(x => { sum.appendChild(x.cloneNode(true)); x.remove(); });
+    sum.insertAdjacentHTML('beforeend', '<span class="sum"></span><span class="chev" aria-hidden="true">▾</span>');
+    h2.remove(); if (head && !head.querySelector('button,a,input,select,label')) head.remove(); else if (head) head.style.justifyContent = 'flex-end';
+    const body = document.createElement('div'); body.className = 'fold-body'; while (sec.firstChild) body.appendChild(sec.firstChild);
+    d.append(sum, body); sec.replaceWith(d);
+  });
+  return t.innerHTML;
+}
 function openModal(html) { closeModal(); const d = document.createElement('div'); d.id = 'modalRoot'; d.innerHTML = html; document.body.appendChild(d); const f = d.querySelector('input,select'); if (f) f.focus(); }
 function closeModal() { const m = $('#modalRoot'); if (m) m.remove(); }
 
 /* ============================================================ events */
 function after(sec, id) {
+  if (sec === 'prefs') pushState();
   const gs = $('#gigSearch'); if (gs) gs.oninput = e => { UI.gigSearch = e.target.value; keepUI(); rerenderKeepFocus('#gigSearch'); };
   const gy = $('#gigYear'); if (gy) gy.onchange = e => { UI.gigYear = e.target.value; keepUI(); render(); };
   const ss = $('#songSearch'); if (ss) ss.oninput = e => { UI.songSearch = e.target.value; keepUI(); rerenderKeepFocus('#songSearch'); };
@@ -2693,7 +2784,7 @@ document.addEventListener('change', async e => {
   } else if (t.matches('[data-song-stars]')) {
     UI.songStars = t.value; keepUI(); render();
   } else if (t.matches('[data-text-size]')) {
-    UI.tz = t.value === 'auto' ? null : Number(t.value); keepUI(); render();
+    const f = FITS[t.value]; if (!f) return; UI.hdr = f.hdr; UI.fpx = f.fpx; UI.tz = f.tz; keepUI(); render();
   } else if (t.matches('[data-chart-default]')) {
     if (!S.me) return;
     try { if (!t.value) { await api.remove('chart_defaults', { member_id: S.me.id }); S.chart_defaults = S.chart_defaults.filter(d => d.member_id !== S.me.id); } else await saveMany('chart_defaults', [{ member_id: S.me.id, use_member_id: t.value }]); toast('Saved'); render(); }
@@ -2795,6 +2886,12 @@ const ACTIONS = {
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
   'client-new': () => openModal(clientModal(null)),
   'client-edit': ({ id }) => openModal(clientModal(byId('clients', id))),
+  'push-on': () => pushOn(), 'push-off': () => pushOff(), 'push-test': () => pushTest(),
+  'att-snooze': ({ el, e }) => { e.preventDefault(); openModal(snoozeModal(el.dataset.k)); },
+  'att-snooze-set': async ({ el }) => { const days = Number(el.dataset.v), until = days ? iso(new Date(today().getTime() + days * 864e5)) : null;
+    if (await guard(() => save('attn_snooze', { key: el.dataset.k, until, member_id: S.me ? S.me.id : null }), days ? `Snoozed until ${mdY(until)}` : 'Hidden for good')) { closeModal(); render(); } },
+  'att-unsnooze': async ({ el }) => { const k = el.dataset.k; if (await guard(() => api.remove('attn_snooze', { key: k }), 'Back on the list')) { S.attn_snooze = (S.attn_snooze || []).filter(z => z.key !== k); render(); } },
+  'att-show-snoozed': () => { UI.showSnoozed = !UI.showSnoozed; keepUI(); render(); },
   'dl-new': ({ el }) => openModal(deadlineModal(null, el.dataset.gig)),
   'dl-edit': ({ id }) => { const d = (S.deadlines || []).find(x => x.id === id); if (d) openModal(deadlineModal(d)); },
   'dl-save': async ({ id }) => {
