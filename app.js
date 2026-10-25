@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 80;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 81;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -2679,7 +2679,12 @@ async function pushState() {
   if (!pushOk()) return set(false, '○ Notifications off', ios && !standalone ? '⚠ Open HQ from its Home Screen icon (Share → Add to Home Screen) to use notifications.' : '⚠ This browser can’t do notifications.', true);
   if (Notification.permission === 'denied') return set(false, '○ Notifications blocked', '⚠ Turn them on for HQ in this device’s Settings → Notifications, then come back here.', true);
   const sub = await pushSub();
+  if (sub && !S._pushSaved) { S._pushSaved = true; pushSave(sub).catch(() => { S._pushSaved = false; }); }   // heals a device that's subscribed but never got saved
   if (sub) set(true, '● Notifications on', 'On for this device. Tap to turn off.'); else set(false, '○ Notifications off', 'Off on this device. Tap to turn on.');
+}
+async function pushSave(sub) {                                      // (re)store this device's address in the database - safe to repeat
+  const j = sub.toJSON(); if (!S.me || !j.endpoint || !j.keys) return;
+  await api.upsert('push_subs', [{ endpoint: j.endpoint, member_id: S.me.id, p256dh: j.keys.p256dh, auth: j.keys.auth, device: navigator.userAgent.slice(0, 160) }]);
 }
 const b64u = s => { const p = '='.repeat((4 - s.length % 4) % 4), b = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
 async function pushOn() {
@@ -2691,8 +2696,7 @@ async function pushOn() {
     const { publicKey } = await kr.json(); if (!publicKey) throw new Error('The VAPID keys aren’t set on band-push yet.');
     const reg = await navigator.serviceWorker.ready; let sub = await reg.pushManager.getSubscription();
     if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(publicKey) });
-    const j = sub.toJSON();
-    await api.upsert('push_subs', [{ endpoint: j.endpoint, member_id: S.me.id, p256dh: j.keys.p256dh, auth: j.keys.auth, device: navigator.userAgent.slice(0, 160) }]);
+    await pushSave(sub);
     toast('Notifications on for this device');
   } catch (e) { toast(e.message || 'Couldn’t turn notifications on.', true); }
   pushState();
@@ -2703,7 +2707,7 @@ async function pushOff() {
 }
 async function pushTest() {
   if (!S.me) return; const sub = await pushSub(); if (!sub) return toast('Turn notifications on for this device first.', true);
-  try { const r = await fetch(pushUrl('event=test&member=' + S.me.id)), j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Push error ' + r.status); toast(j.sent ? 'Test sent — watch for it' : 'No devices to send to'); }
+  try { await pushSave(sub); const r = await fetch(pushUrl('event=test&member=' + S.me.id)), j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Push error ' + r.status); toast(j.sent ? 'Test sent — watch for it' : j.failed ? 'Apple/Google refused the test (' + j.failed + ' device) — turn notifications off and on again here.' : 'No devices to send to', !j.sent); }
   catch (e) { toast(e.message || 'Couldn’t send the test.', true); }
 }
 function foldPanels(html, prefix, only) {
