@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 79;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 80;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1792,8 +1792,8 @@ function prefsView() {
   </section>
   ${mgr ? `<section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Phone notifications</h2>
     <p class="small muted" style="margin-top:0">Managers get a buzz on this device when a website inquiry comes in, and a morning heads-up when a deadline is due or overdue. Turn it on separately on each phone or iPad. On iPhone/iPad it only works in the Home Screen app (iOS 16.4 or newer).</p>
-    <div class="small" id="pushState" style="margin:6px 0 10px">Checking…</div>
-    <div class="row"><button class="btn sm gold" data-act="push-on">Turn on for this device</button><button class="btn sm" data-act="push-test">Send me a test</button><button class="btn sm ghost" data-act="push-off">Turn off here</button></div>
+    <div class="row" style="margin-top:6px"><button class="btn" id="pushBtn" data-act="push-toggle" aria-pressed="false">Checking…</button><button class="btn sm" id="pushTestBtn" data-act="push-test" disabled>Send me a test</button></div>
+    <div class="small muted" id="pushState" style="margin-top:8px"></div>
   </section>` : ''}`, 'prefs', ['Page-turner pedal', 'Phone notifications']);
 }
 function trashPanel() {
@@ -2672,12 +2672,14 @@ const pushUrl = q => `${SUPABASE_URL}/functions/v1/band-push?token=${settings().
 const pushOk = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 async function pushSub() { try { const r = await navigator.serviceWorker.ready; return await r.pushManager.getSubscription(); } catch { return null; } }
 async function pushState() {
-  const el = $('#pushState'); if (!el) return;
+  const el = $('#pushState'), btn = $('#pushBtn'), test = $('#pushTestBtn'); if (!el || !btn) return;
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const standalone = !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches));
-  if (!pushOk()) { el.innerHTML = ios && !standalone ? '⚠ Open HQ from its Home Screen icon (Share → Add to Home Screen) to use notifications.' : '⚠ This browser can’t do notifications.'; return; }
-  if (Notification.permission === 'denied') { el.innerHTML = '⚠ Notifications are blocked for HQ — turn them on in this device’s Settings → Notifications.'; return; }
-  const sub = await pushSub(); el.innerHTML = sub ? '<span style="color:var(--ok)">● On for this device</span>' : '<span class="muted">○ Off on this device</span>';
+  const set = (on, label, note, disabled) => { btn.classList.toggle('gold', on); btn.setAttribute('aria-pressed', on ? 'true' : 'false'); btn.textContent = label; btn.disabled = !!disabled; if (test) test.disabled = !on; el.innerHTML = note; };
+  if (!pushOk()) return set(false, '○ Notifications off', ios && !standalone ? '⚠ Open HQ from its Home Screen icon (Share → Add to Home Screen) to use notifications.' : '⚠ This browser can’t do notifications.', true);
+  if (Notification.permission === 'denied') return set(false, '○ Notifications blocked', '⚠ Turn them on for HQ in this device’s Settings → Notifications, then come back here.', true);
+  const sub = await pushSub();
+  if (sub) set(true, '● Notifications on', 'On for this device. Tap to turn off.'); else set(false, '○ Notifications off', 'Off on this device. Tap to turn on.');
 }
 const b64u = s => { const p = '='.repeat((4 - s.length % 4) % 4), b = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
 async function pushOn() {
@@ -2886,7 +2888,7 @@ const ACTIONS = {
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
   'client-new': () => openModal(clientModal(null)),
   'client-edit': ({ id }) => openModal(clientModal(byId('clients', id))),
-  'push-on': () => pushOn(), 'push-off': () => pushOff(), 'push-test': () => pushTest(),
+  'push-toggle': async () => { (await pushSub()) ? pushOff() : pushOn(); }, 'push-test': () => pushTest(),
   'att-snooze': ({ el, e }) => { e.preventDefault(); openModal(snoozeModal(el.dataset.k)); },
   'att-snooze-set': async ({ el }) => { const days = Number(el.dataset.v), until = days ? iso(new Date(today().getTime() + days * 864e5)) : null;
     if (await guard(() => save('attn_snooze', { key: el.dataset.k, until, member_id: S.me ? S.me.id : null }), days ? `Snoozed until ${mdY(until)}` : 'Hidden for good')) { closeModal(); render(); } },
