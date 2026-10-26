@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 81;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 83;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -597,7 +597,7 @@ function homeView() {
   const attAll = attention(), att = attAll.filter(a => !isSnoozed(a.key)), snoozed = attAll.filter(a => isSnoozed(a.key));
   const n = next ? days(t, next.gig_date) : null;
   const nd = nextGig ? days(t, nextGig.gig_date) : null;
-  return `
+  return `<div id="pushNag"></div>
   ${next ? `<a class="next" href="#gig/${next.id}" style="text-decoration:none;color:inherit;margin-bottom:18px">
      <div><div class="eyebrow">${next.kind === 'practice' ? 'Next practice' : 'Next gig'}</div>
        <div class="when">${n === 0 ? 'Tonight' : n === 1 ? 'Tomorrow' : 'In ' + n + ' days'}</div>
@@ -1790,8 +1790,8 @@ function prefsView() {
       <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
   </section>
-  ${mgr ? `<section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Phone notifications</h2>
-    <p class="small muted" style="margin-top:0">Managers get a buzz on this device when a website inquiry comes in, and a morning heads-up when a deadline is due or overdue. Turn it on separately on each phone or iPad. On iPhone/iPad it only works in the Home Screen app (iOS 16.4 or newer).</p>
+  ${S.me ? `<section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Phone notifications</h2>
+    <p class="small muted" style="margin-top:0">Everyone gets a “charge your gear” buzz at 8pm the night before a practice or gig.${mgr ? ' Managers also get one when a website inquiry comes in, and a morning heads-up when a deadline is due or overdue.' : ''} Turn it on separately on each phone or iPad. On iPhone/iPad it only works in the Home Screen app (iOS 16.4 or newer).</p>
     <div class="row" style="margin-top:6px"><button class="btn" id="pushBtn" data-act="push-toggle" aria-pressed="false">Checking…</button><button class="btn sm" id="pushTestBtn" data-act="push-test" disabled>Send me a test</button></div>
     <div class="small muted" id="pushState" style="margin-top:8px"></div>
   </section>` : ''}`, 'prefs', ['Page-turner pedal', 'Phone notifications']);
@@ -2701,6 +2701,15 @@ async function pushOn() {
   } catch (e) { toast(e.message || 'Couldn’t turn notifications on.', true); }
   pushState();
 }
+/* Home: until this device has notifications on, offer them in one tap (iOS only lets a page ask after you tap something) */
+async function pushNag() {
+  const el = $('#pushNag'); if (!el || !S.me || S.offline || !pushOk() || Notification.permission === 'denied') return;
+  if (UI.pushNagUntil && UI.pushNagUntil > todayIso()) return;
+  if (await pushSub()) return;
+  el.innerHTML = `<section class="panel push-nag"><div class="row" style="flex-wrap:nowrap;align-items:flex-start"><div style="font-size:26px;line-height:1">🔋</div>
+    <div class="grow"><b>Get the “charge your gear” reminder</b><div class="small muted" style="margin-top:2px">A buzz at 8pm the night before every practice and gig${isMgr() ? ', plus new website inquiries and deadlines' : ''}.</div></div></div>
+    <div class="row" style="margin-top:10px;justify-content:flex-end"><button class="btn sm ghost" data-act="push-nag-later">Not now</button><button class="btn sm gold" data-act="push-nag-on">Turn on</button></div></section>`;
+}
 async function pushOff() {
   const sub = await pushSub(); if (sub) { try { await api.remove('push_subs', { endpoint: sub.endpoint }); } catch {} try { await sub.unsubscribe(); } catch {} }
   toast('Notifications off for this device'); pushState();
@@ -2734,6 +2743,7 @@ function closeModal() { const m = $('#modalRoot'); if (m) m.remove(); }
 /* ============================================================ events */
 function after(sec, id) {
   if (sec === 'prefs') pushState();
+  if (sec === 'home' || !sec) pushNag();
   const gs = $('#gigSearch'); if (gs) gs.oninput = e => { UI.gigSearch = e.target.value; keepUI(); rerenderKeepFocus('#gigSearch'); };
   const gy = $('#gigYear'); if (gy) gy.onchange = e => { UI.gigYear = e.target.value; keepUI(); render(); };
   const ss = $('#songSearch'); if (ss) ss.oninput = e => { UI.songSearch = e.target.value; keepUI(); rerenderKeepFocus('#songSearch'); };
@@ -2892,6 +2902,8 @@ const ACTIONS = {
   'gig-view': ({ g }) => { if (!g) return; if (S.dirty && !confirm('Discard your unsaved changes?')) return; S.editGig = null; S.dirty = false; render(); },
   'client-new': () => openModal(clientModal(null)),
   'client-edit': ({ id }) => openModal(clientModal(byId('clients', id))),
+  'push-nag-on': async () => { await pushOn(); pushNag(); const el = $('#pushNag'); if (el && (await pushSub())) el.innerHTML = ''; },
+  'push-nag-later': () => { UI.pushNagUntil = iso(new Date(today().getTime() + 14 * 864e5)); keepUI(); const el = $('#pushNag'); if (el) el.innerHTML = ''; },
   'push-toggle': async () => { (await pushSub()) ? pushOff() : pushOn(); }, 'push-test': () => pushTest(),
   'att-snooze': ({ el, e }) => { e.preventDefault(); openModal(snoozeModal(el.dataset.k)); },
   'att-snooze-set': async ({ el }) => { const days = Number(el.dataset.v), until = days ? iso(new Date(today().getTime() + days * 864e5)) : null;
