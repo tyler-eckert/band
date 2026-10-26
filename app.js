@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 84;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 86;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1791,7 +1791,7 @@ function prefsView() {
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
   </section>
   ${S.me ? `<section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Phone notifications</h2>
-    <p class="small muted" style="margin-top:0">Everyone gets a “charge your gear” buzz at 8pm the night before a practice or gig.${mgr ? ' Managers also get one when a website inquiry comes in, and a morning heads-up when a deadline is due or overdue.' : ''} Turn it on separately on each phone or iPad. On iPhone/iPad it only works in the Home Screen app (iOS 16.4 or newer).</p>
+    <p class="small muted" style="margin-top:0">Everyone gets a “CHARGE YOUR SHIT!” buzz at 8pm the night before a practice or gig.${mgr ? ' Managers also get one when a website inquiry comes in, and a morning heads-up when a deadline is due or overdue.' : ''} Turn it on separately on each phone or iPad. On iPhone/iPad it only works in the Home Screen app (iOS 16.4 or newer).</p>
     <div class="row" style="margin-top:6px"><button class="btn" id="pushBtn" data-act="push-toggle" aria-pressed="false">Checking…</button><button class="btn sm" id="pushTestBtn" data-act="push-test" disabled>Send me a test</button></div>
     <div class="small muted" id="pushState" style="margin-top:8px"></div>
   </section>` : ''}`, 'prefs', ['Page-turner pedal', 'Phone notifications']);
@@ -2707,7 +2707,7 @@ async function pushNag() {
   if (UI.pushNagUntil && UI.pushNagUntil > todayIso()) return;
   if (await pushSub()) return;
   el.innerHTML = `<section class="panel push-nag"><div class="row" style="flex-wrap:nowrap;align-items:flex-start"><div style="font-size:26px;line-height:1">🔋</div>
-    <div class="grow"><b>Get the “charge your gear” reminder</b><div class="small muted" style="margin-top:2px">A buzz at 8pm the night before every practice and gig${isMgr() ? ', plus new website inquiries and deadlines' : ''}.</div></div></div>
+    <div class="grow"><b>Get the “CHARGE YOUR SHIT!” reminder</b><div class="small muted" style="margin-top:2px">A buzz at 8pm the night before every practice and gig${isMgr() ? ', plus new website inquiries and deadlines' : ''}.</div></div></div>
     <div class="row" style="margin-top:10px;justify-content:flex-end"><button class="btn sm ghost" data-act="push-nag-later">Not now</button><button class="btn sm gold" data-act="push-nag-on">Turn on</button></div></section>`;
 }
 async function pushOff() {
