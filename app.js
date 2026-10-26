@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 83;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 84;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1053,7 +1053,7 @@ function gigEdit(g) {
    </div>
   </div>`;
 }
-const FOLD_DEFAULT = { dayof: false, details: true, setlist: true, client: false, money: false, paper: false, cal: false, payout: false };
+const FOLD_DEFAULT = { 'prefs-phone-notifications': true, dayof: false, details: true, setlist: true, client: false, money: false, paper: false, cal: false, payout: false };
 const foldOpen = k => ((UI.folds || {})[k] ?? FOLD_DEFAULT[k]) ? 'open' : '';
 document.addEventListener('toggle', e => { const d = e.target; if (!d.matches || !d.matches('details[data-fold]')) return; UI.folds = { ...(UI.folds || {}), [d.dataset.fold]: d.open }; keepUI(); }, true);
 function lineItem(g, plain) {
