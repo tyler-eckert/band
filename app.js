@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 86;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 87;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -2175,7 +2175,7 @@ async function refreshNow(manual) {
 })();
 
 /* ============================================================ pencil markup */
-const GMK = { on: false, tool: 'pen', color: '#111111', strokes: [], undo: [], key: null, songId: null, path: null, cur: null, pending: null, timer: null, scroll: null };
+const GMK = { on: false, tool: 'pen', input: (typeof UI !== 'undefined' && UI.editInput) || 'pencil', tsz: 0.03, edit: null, color: '#111111', strokes: [], undo: [], key: null, songId: null, path: null, cur: null, pending: null, timer: null, scroll: null };
 const PEN_COLORS = [['#111111', 'Black'], ['#d11a2a', 'Red'], ['#1d4ed8', 'Blue']];
 const r3 = n => Math.round(n * 1000) / 1000, r4 = n => Math.round(n * 10000) / 10000;
 function segDist(px, py, ax, ay, bx, by) {                          // distance from a point to a line segment
@@ -2185,6 +2185,13 @@ function segDist(px, py, ax, ay, bx, by) {                          // distance 
 function drawStroke(ctx, s, w, h) {                                // points are stored as fractions of the page, so marks fit any zoom or screen
   const pts = s.pts; if (!pts.length || !ctx) return;
   ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = s.c; ctx.fillStyle = s.c;
+  if (s.t === 'txt') {                                             // typed note: text on a soft white backing so it reads over the notation
+    const fs = s.w * w, lh = fs * 1.2, lines = String(s.s || '').split('\n'); ctx.font = `600 ${fs}px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif`; ctx.textBaseline = 'top';
+    const bw = Math.max(...lines.map(l => ctx.measureText(l).width)) + fs * .5, bh = lines.length * lh + fs * .3, x = pts[0][0] * w, y = pts[0][1] * h;
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(x - fs * .25, y - fs * .15, bw, bh); ctx.fillStyle = s.c;
+    lines.forEach((l, i) => ctx.fillText(l, x, y + i * lh)); s.bw = bw / w; s.bh = bh / h;             // remember the box (as page fractions) for tapping / erasing
+    ctx.restore(); return;
+  }
   if (s.t === 'hl') {
     ctx.globalAlpha = .38; ctx.lineWidth = s.w * w; ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h)); ctx.stroke();
   } else if (pts.length === 1) { ctx.beginPath(); ctx.arc(pts[0][0] * w, pts[0][1] * h, s.w * w * (.5 + pts[0][2]) / 2, 0, 7); ctx.fill(); }
@@ -2207,7 +2214,7 @@ function gmRedraw(only) {
   (GM.pgs || []).forEach((P, k) => {
     if (only != null && only !== k) return; const ctx = P.ov.getContext && P.ov.getContext('2d'); if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, P.ov.width, P.ov.height); ctx.setTransform(P.dpr, 0, 0, P.dpr, 0, 0);
-    GMK.strokes.forEach(s => { if (s.pg === k) drawStroke(ctx, s, P.w, P.h); });
+    GMK.strokes.forEach(s => { if (s.pg === k && !s.hide) drawStroke(ctx, s, P.w, P.h); });
     if (GMK.cur && GMK.cur.stroke && GMK.cur.stroke.pg === k) drawStroke(ctx, GMK.cur.stroke, P.w, P.h);
   });
 }
@@ -2243,27 +2250,65 @@ async function marksPull(songIds) {                                 // bring thi
 }
 window.addEventListener('online', () => marksSync());
 function gmToolsHtml() {
-  const tb = (v, label, extra = '') => `<button class="gm-tb ${GMK.tool === v && (v !== 'pen' || GMK.color === extra) ? 'on' : ''}" data-gm="tool" data-v="${v}" ${v === 'pen' ? `data-c="${extra}"` : ''}>${label}</button>`;
-  return PEN_COLORS.map(([c, n]) => `<button class="gm-sw ${GMK.tool === 'pen' && GMK.color === c ? 'on' : ''}" data-gm="tool" data-v="pen" data-c="${c}" aria-label="${n} pen" style="--c:${c}"></button>`).join('')
-    + `<button class="gm-tb ${GMK.tool === 'hl' ? 'on' : ''}" data-gm="tool" data-v="hl">Highlight</button><button class="gm-tb ${GMK.tool === 'erase' ? 'on' : ''}" data-gm="tool" data-v="erase">Erase</button><span class="spacer"></span><button class="gm-tb" data-gm="undo">Undo</button><button class="gm-tb" data-gm="clear">Clear</button><button class="gm-tb done" data-gm="pen">Done</button>`;
+  const txt = GMK.tool === 'text', mode = txt ? 'text' : GMK.input;
+  const m = (v, l, hint) => `<button class="gm-tb gm-mode ${mode === v ? 'on' : ''}" data-gm="mode" data-v="${v}" title="${hint}">${l}</button>`;
+  return `<span class="gm-mgrp">${m('pencil', '✏️ Pen', 'Draw with the Apple Pencil (fingers still scroll)')}${m('text', 'T Text', 'Tap the page to type a note')}${m('finger', '☝️ Finger', 'Draw with your finger')}</span><span class="gm-sep"></span>`
+    + PEN_COLORS.map(([c, n]) => `<button class="gm-sw ${(GMK.tool === 'pen' || txt) && GMK.color === c ? 'on' : ''}" data-gm="tool" data-v="${txt ? 'text' : 'pen'}" data-c="${c}" aria-label="${n}" style="--c:${c}"></button>`).join('')
+    + (txt ? [[0.022, 'S'], [0.03, 'M'], [0.042, 'L']].map(([v, l]) => `<button class="gm-tb ${GMK.tsz === v ? 'on' : ''}" data-gm="tsz" data-v="${v}" aria-label="Text size ${l}">${l}</button>`).join('')
+      : `<button class="gm-tb ${GMK.tool === 'hl' ? 'on' : ''}" data-gm="tool" data-v="hl">Highlight</button><button class="gm-tb ${GMK.tool === 'erase' ? 'on' : ''}" data-gm="tool" data-v="erase">Erase</button>`)
+    + `<span class="spacer"></span><button class="gm-tb" data-gm="undo">Undo</button><button class="gm-tb" data-gm="clear">Clear</button><button class="gm-tb done" data-gm="pen">Done</button>`
+    + (txt ? '<div class="gm-hint">Tap the page to add a note · tap a note to change it · empty it to delete</div>' : mode === 'finger' ? '<div class="gm-hint">Drawing with your finger · to scroll, switch to Pen or Text, or use the pedal</div>' : '');
 }
+/* ---- typed notes on a chart (Edit → Text) */
+const txtHit = (s, x, y) => { const p = s.pts[0], bw = s.bw || 0.2, bh = s.bh || 0.04; return x >= p[0] - 0.01 && x <= p[0] + bw && y >= p[1] - 0.01 && y <= p[1] + bh; };
+function gmTextAt(ov, clientX, clientY) {
+  gmTextCommit(); const pg = Number(ov.dataset.pg), P = GM.pgs[pg], r = ov.getBoundingClientRect(); if (!P) return;
+  const x = (clientX - r.left) / r.width, y = (clientY - r.top) / r.height;
+  const old = GMK.strokes.slice().reverse().find(s => s.pg === pg && s.t === 'txt' && txtHit(s, x, y));
+  const at = old ? old.pts[0] : [r4(x), r4(Math.max(0, y - GMK.tsz * P.w / P.h / 2))], fs = (old ? old.w : GMK.tsz) * P.w;
+  const ta = document.createElement('textarea'); ta.className = 'gm-txt'; ta.value = old ? old.s : ''; ta.rows = 1; ta.setAttribute('autocapitalize', 'sentences');
+  ta.style.cssText = `left:${at[0] * P.w}px;top:${at[1] * P.h}px;font-size:${fs}px;color:${old ? old.c : GMK.color}`;
+  const grow = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; ta.style.width = 'auto'; ta.style.width = Math.min(P.w - at[0] * P.w, Math.max(fs * 4, ta.scrollWidth + 4)) + 'px'; };
+  ta.addEventListener('input', grow); ta.addEventListener('blur', () => setTimeout(gmTextCommit, 0));
+  ov.parentElement.appendChild(ta); GMK.edit = { ta, pg, at, old, c: old ? old.c : GMK.color, w: old ? old.w : GMK.tsz };
+  if (old) { old.hide = true; gmRedraw(pg); }
+  grow(); ta.focus();
+}
+function gmTextCommit() {
+  const e = GMK.edit; if (!e) return; GMK.edit = null; const txt = e.ta.value.replace(/\s+$/, ''); e.ta.remove();
+  if (e.old) { delete e.old.hide; GMK.strokes = GMK.strokes.filter(s => s !== e.old); }
+  const add = txt ? { t: 'txt', pg: e.pg, pts: [[e.at[0], e.at[1], .5]], s: txt, c: e.c, w: e.w } : null;
+  if (add) GMK.strokes.push(add);
+  if (add || e.old) { GMK.undo.push({ add, del: e.old ? [e.old] : [] }); gmMarksSaveSoon(); }
+  gmRedraw(e.pg);
+}
+
 function gmPenToggle(on) {
-  GMK.on = on == null ? !GMK.on : on; const d = $('#gigMode'); if (!d) return; d.classList.toggle('gm-pen', GMK.on);
+  gmTextCommit(); GMK.on = on == null ? !GMK.on : on; const d = $('#gigMode'); if (!d) return; d.classList.toggle('gm-pen', GMK.on);
   setTimeout(() => { if (GM.open) { gmMarksFlush(); gmLoadChart(); } }, 40);                                  // the toolbar changes the viewing height: re-fit the whole page
   const t = $('#gmTools'); if (t) { t.hidden = !GMK.on; t.innerHTML = GMK.on ? gmToolsHtml() : ''; } const b = $('#gmPenBtn'); if (b) b.classList.toggle('on', GMK.on);
 }
 function gmPtr(e) {
   if (!GMK.on) return; const view = $('#gmView'); if (!view) return;
+  if (e.target && e.target.closest && e.target.closest('.gm-txt')) return;                         // typing in a note: leave it alone
+  const textTool = GMK.tool === 'text', fingerDraws = GMK.input === 'finger' && !textTool;
   if (e.type === 'pointerdown') {
     if (e.pointerType !== 'touch') GMK.lastPen = Date.now();
-    if (e.pointerType === 'touch') { if (GMK.cur || Date.now() - (GMK.lastPen || 0) < 900) return; GMK.scroll = { id: e.pointerId, y: e.clientY, x: e.clientX, top: view.scrollTop, left: view.scrollLeft }; return; }     // fingers scroll, the Pencil draws
+    if (textTool) {                                                  // Text: a tap (finger or Pencil) places / opens a note; a drag still scrolls
+      const ov = e.target.closest && e.target.closest('.gm-ov'); GMK.tap = ov && GMK.key ? { id: e.pointerId, x: e.clientX, y: e.clientY, ov } : null;
+      if (e.pointerType === 'touch') GMK.scroll = { id: e.pointerId, y: e.clientY, x: e.clientX, top: view.scrollTop, left: view.scrollLeft };
+      if (GMK.tap) e.preventDefault(); return;
+    }
+    if (e.pointerType === 'touch' && !fingerDraws) { if (GMK.cur || Date.now() - (GMK.lastPen || 0) < 900) return; GMK.scroll = { id: e.pointerId, y: e.clientY, x: e.clientX, top: view.scrollTop, left: view.scrollLeft }; return; }     // fingers scroll, the Pencil draws
+    if (GMK.cur) return;                                             // a second finger while drawing: ignore it
     const ov = e.target.closest && e.target.closest('.gm-ov'); if (!ov || !GMK.key) return; e.preventDefault();
     if (ov.setPointerCapture) { try { ov.setPointerCapture(e.pointerId); } catch {} }
     const pg = Number(ov.dataset.pg), P = GM.pgs[pg], r = ov.getBoundingClientRect();
     GMK.cur = { id: e.pointerId, pg, r, P, removed: [], stroke: GMK.tool === 'erase' ? null : { t: GMK.tool === 'hl' ? 'hl' : 'pen', c: GMK.tool === 'hl' ? '#ffd400' : GMK.color, w: GMK.tool === 'hl' ? 0.024 : 0.0034, pg, pts: [] } };
     gmPtr({ type: 'pointermove', pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY, pressure: e.pressure, pointerType: e.pointerType, getCoalescedEvents: null, _first: true });
   } else if (e.type === 'pointermove') {
-    if (GMK.scroll && e.pointerId === GMK.scroll.id) { if (GMK.cur || Date.now() - (GMK.lastPen || 0) < 900) { GMK.scroll = null; return; } const dy = e.clientY - GMK.scroll.y, dx = e.clientX - GMK.scroll.x; if (!GMK.scroll.go && Math.hypot(dx, dy) < 8) return; GMK.scroll.go = true; view.scrollTop = GMK.scroll.top - dy; view.scrollLeft = GMK.scroll.left - dx; return; }
+    if (GMK.tap && e.pointerId === GMK.tap.id && Math.hypot(e.clientX - GMK.tap.x, e.clientY - GMK.tap.y) > 8) GMK.tap = null;   // it's a drag, not a tap
+    if (GMK.scroll && e.pointerId === GMK.scroll.id) { if (GMK.cur || (!textTool && Date.now() - (GMK.lastPen || 0) < 900)) { GMK.scroll = null; return; } const dy = e.clientY - GMK.scroll.y, dx = e.clientX - GMK.scroll.x; if (!GMK.scroll.go && Math.hypot(dx, dy) < 8) return; GMK.scroll.go = true; view.scrollTop = GMK.scroll.top - dy; view.scrollLeft = GMK.scroll.left - dx; return; }
     const c = GMK.cur; if (!c || e.pointerId !== c.id) return; if (!e._first) e.preventDefault && e.preventDefault();
     const evs = (e.getCoalescedEvents && e.getCoalescedEvents().length) ? e.getCoalescedEvents() : [e];
     const pen = c.stroke && c.stroke.t === 'pen', from = c.stroke ? c.stroke.pts.length : 0;
@@ -2274,7 +2319,7 @@ function gmPtr(e) {
         if (last && Math.abs(x - last[0]) * c.P.w < .35 && Math.abs(y - last[1]) * c.P.h < .35) continue;   // ignore sub-pixel jitter
         pts.push([x, y, Math.round((last ? last[2] * .6 + raw * .4 : raw) * 100) / 100]);   // ease pressure so the width doesn't flicker
       }
-      else { const rad = 0.03; GMK.strokes = GMK.strokes.filter(s => { if (s.pg !== c.pg) return true; const hit = s.pts.some(([sx, sy], i) => { const a = s.pts[i - 1] || [sx, sy]; return segDist(x * c.P.w, y * c.P.h, a[0] * c.P.w, a[1] * c.P.h, sx * c.P.w, sy * c.P.h) < rad * c.P.w; }); if (hit) c.removed.push(s); return !hit; }); }
+      else { const rad = 0.03; GMK.strokes = GMK.strokes.filter(s => { if (s.pg !== c.pg) return true; const hit = s.t === 'txt' ? txtHit(s, x, y) : s.pts.some(([sx, sy], i) => { const a = s.pts[i - 1] || [sx, sy]; return segDist(x * c.P.w, y * c.P.h, a[0] * c.P.w, a[1] * c.P.h, sx * c.P.w, sy * c.P.h) < rad * c.P.w; }); if (hit) c.removed.push(s); return !hit; }); }
     }
     if (pen && c.stroke.pts.length > from) {                     // pen: draw just the new pieces on top — no full repaint while writing
       const ctx = c.P.ov.getContext && c.P.ov.getContext('2d'), s = c.stroke; if (!ctx) return;
@@ -2284,6 +2329,7 @@ function gmPtr(e) {
       ctx.restore();
     } else if (!pen) gmRedrawSoon(c.pg);                          // highlighter / eraser: repaint once per frame
   } else if (e.type === 'pointerup' || e.type === 'pointercancel') {
+    if (GMK.tap && e.pointerId === GMK.tap.id) { const t = GMK.tap; GMK.tap = null; if (GMK.scroll && GMK.scroll.id === e.pointerId) GMK.scroll = null; if (e.type === 'pointerup') gmTextAt(t.ov, t.x, t.y); return; }
     if (GMK.scroll && e.pointerId === GMK.scroll.id) { const moved = GMK.scroll.go; GMK.scroll = null; if (moved) gmSnap(); return; }
     const c = GMK.cur; if (!c || e.pointerId !== c.id) return; GMK.cur = null;
     if (c.stroke && c.stroke.pts.length) { GMK.strokes.push(c.stroke); GMK.undo.push({ add: c.stroke }); gmMarksSaveSoon(); }
@@ -2293,7 +2339,7 @@ function gmPtr(e) {
 }
 function gmUndo() {
   const a = GMK.undo.pop(); if (!a) return;
-  if (a.add) GMK.strokes = GMK.strokes.filter(s => s !== a.add); else GMK.strokes.push(...a.del);
+  if (a.add) GMK.strokes = GMK.strokes.filter(s => s !== a.add); if (a.del && a.del.length) GMK.strokes.push(...a.del);
   gmRedraw(); gmMarksSaveSoon();
 }
 function gmClear() {
@@ -2314,15 +2360,15 @@ function openGigMode(seq, lid, opts = {}) {
   d.innerHTML = `<div class="gm-top"><button class="gm-btn" data-gm="exit" aria-label="Exit gig mode">✕</button>
     <div class="gm-title"><div class="gm-t1" id="gmT1"></div><div class="gm-t2"><span id="gmT2"></span><span id="gmPg"></span> <span id="gmPre"></span></div></div>
     <button class="gm-awake" data-gm="awake" id="gmAwake"></button>
-    <button class="gm-btn" data-gm="metro" id="gmMetroBtn" aria-label="Metronome">♩</button><button class="gm-btn" data-gm="pen" id="gmPenBtn" aria-label="Pencil markup">Pen</button><button class="gm-btn" data-gm="zoom-out" aria-label="Smaller">A−</button><button class="gm-btn" data-gm="zoom-in" aria-label="Bigger">A+</button>${GM.preview ? '' : '<button class="gm-btn" data-gm="list" aria-label="Song list">☰</button>'}</div>
+    <button class="gm-btn" data-gm="metro" id="gmMetroBtn" aria-label="Metronome">♩</button><button class="gm-btn" data-gm="pen" id="gmPenBtn" aria-label="Edit this chart (pen, text, finger)">Edit</button><button class="gm-btn" data-gm="zoom-out" aria-label="Smaller">A−</button><button class="gm-btn" data-gm="zoom-in" aria-label="Bigger">A+</button>${GM.preview ? '' : '<button class="gm-btn" data-gm="list" aria-label="Song list">☰</button>'}</div>
     <input id="gmKeys" class="gm-keys" readonly inputmode="none" autocomplete="off" autocapitalize="off" aria-hidden="true" tabindex="-1">
     <div class="gm-tools" id="gmTools" hidden></div><div class="gm-metro" id="gmMetro" hidden></div><div class="gm-big" id="gmBig" hidden></div><div class="gm-view" id="gmView"></div><div class="gm-bottom" id="gmBottom"></div><div class="gm-drawer" id="gmDrawer" hidden></div>`;
   document.body.appendChild(d);
   d.addEventListener('click', gmClick); d.addEventListener('input', e => { if (e.target.matches('[data-gm-vol]')) { UI.metro = { ...metroPrefs(), vol: Number(e.target.value) }; keepUI(); const o = e.target.nextElementSibling; if (o) o.textContent = e.target.value > 0 ? Math.round(e.target.value * 100) + '%' : 'Off'; } }); d.addEventListener('change', e => { const k = e.target.dataset && e.target.dataset.gmSel; if (k) metroPref(k, e.target.value); else if (e.target.matches('[data-gm-vol]')) metroPanel(); }); document.addEventListener('keydown', gmKey, true); document.addEventListener('visibilitychange', gmVis);
   d.addEventListener('selectstart', e => e.preventDefault()); d.setAttribute('tabindex', '-1');
-  const busy = () => { const a = document.activeElement; return a && a.matches && a.matches('select,input[type=range]'); };   // a dropdown or slider is in use: don't steal its focus
+  const busy = () => { const a = document.activeElement; return a && a.matches && a.matches('select,input[type=range],textarea.gm-txt'); };   // a dropdown or slider is in use: don't steal its focus
   const focusKeys = () => { const k = $('#gmKeys'); if (GM.open && k && document.activeElement !== k && !busy()) { try { k.focus({ preventScroll: true }); } catch {} } };
-  const later = (e, ms) => { if (e && e.target && e.target.closest && e.target.closest('select,input[type=range]')) return; setTimeout(focusKeys, ms); };
+  const later = (e, ms) => { if (e && e.target && e.target.closest && e.target.closest('select,input[type=range],.gm-txt,[data-gm=mode],.gm-ov')) return; setTimeout(focusKeys, ms); };
   d.addEventListener('pointerup', e => later(e, 30)); d.addEventListener('click', e => later(e, 30)); d.addEventListener('focusout', e => later(e, 120));
   focusKeys();
   let pgT = null; d.querySelector('#gmView').addEventListener('scroll', () => { clearTimeout(pgT); pgT = setTimeout(gmPageInd, 120); });
@@ -2425,6 +2471,7 @@ function metroAct(a, el) {
   return true;
 }
 function closeGigMode(quiet) {
+  gmTextCommit();
   metroStop(); METRO.open = false; METRO.over = {};
   if (GM.onResize) { window.removeEventListener('resize', GM.onResize); GM.onResize = null; }
   mediaOff(); gmMarksFlush(); GMK.on = false; GMK.cur = null;
@@ -2466,7 +2513,9 @@ function gmTurn(dir) {
 const pedSig = e => ({ k: e.key, c: e.code || '', kc: e.keyCode || 0 });
 const pedHit = (e, list) => (list || []).some(s => (s.k && s.k !== 'Unidentified' && e.key === s.k) || (s.c && e.code && e.code === s.c) || (s.kc && e.keyCode === s.kc && (!s.k || s.k === 'Unidentified')));
 function gmKey(e) {
-  if (!GM.open || e.metaKey || e.ctrlKey || e.altKey) return; const k = e.key, ped = UI.ped || {};
+  if (!GM.open || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target && e.target.classList && e.target.classList.contains('gm-txt')) { if (e.key === 'Escape') e.target.blur(); return; }   // typing a note: keys are text, not page turns
+  const k = e.key, ped = UI.ped || {};
   const next = pedHit(e, ped.next) || ['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(k) || [34, 39, 40, 32, 13].includes(e.keyCode);
   const prev = pedHit(e, ped.prev) || ['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(k) || [33, 37, 38, 8].includes(e.keyCode);
   if (next && !prev) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) gmTurn(1); }
@@ -2524,8 +2573,10 @@ function gmClick(e) {
   if (a === 'exit') closeGigMode();
   else if (a === 'next') gmShow(GM.i + 1); else if (a === 'prev') gmShow(GM.i - 1);
   else if (a === 'pen') gmPenToggle();
-  else if (a === 'tool') { GMK.tool = el.dataset.v; if (el.dataset.c) GMK.color = el.dataset.c; $('#gmTools').innerHTML = gmToolsHtml(); }
-  else if (a === 'undo') gmUndo(); else if (a === 'clear') gmClear();
+  else if (a === 'tool') { gmTextCommit(); GMK.tool = el.dataset.v; if (el.dataset.c) GMK.color = el.dataset.c; $('#gmTools').innerHTML = gmToolsHtml(); }
+  else if (a === 'mode') { gmTextCommit(); const v = el.dataset.v; if (v === 'text') GMK.tool = 'text'; else { GMK.input = v; UI.editInput = v; keepUI(); if (GMK.tool === 'text') GMK.tool = 'pen'; } $('#gmTools').innerHTML = gmToolsHtml(); }
+  else if (a === 'tsz') { GMK.tsz = Number(el.dataset.v); $('#gmTools').innerHTML = gmToolsHtml(); }
+  else if (a === 'undo') { gmTextCommit(); gmUndo(); } else if (a === 'clear') { gmTextCommit(); gmClear(); }
   else if (a === 'zoom-in' || a === 'zoom-out') { const k = GM_ZOOM.indexOf(GM.zoom); GM.zoom = GM_ZOOM[Math.max(0, Math.min(GM_ZOOM.length - 1, k + (a === 'zoom-in' ? 1 : -1)))]; gmLoadChart(); }
   else if (a === 'list') { GM.drawer = !GM.drawer; gmDrawer(); }
   else if (a === 'go') { GM.drawer = false; gmDrawer(); gmShow(Number(el.dataset.i)); }
