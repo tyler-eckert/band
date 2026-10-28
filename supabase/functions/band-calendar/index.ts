@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
   const since = new Date(Date.now() - 120 * 864e5).toISOString().slice(0, 10);
   const { data: gigs, error } = await db.from("gigs")
     .select("id,kind,status,title,gig_date,start_time,end_time,load_in_time,venue,address,notes,hours")
-    .gte("gig_date", since).order("gig_date");
+    .gte("gig_date", since).is("deleted_at", null).order("gig_date");   // anything in the app's Trash stays off the feed
   if (error) return new Response("Feed error", { status: 500 });
 
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
