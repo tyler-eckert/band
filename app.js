@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 87;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 88;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1794,6 +1794,11 @@ function prefsView() {
     <p class="small muted" style="margin-top:0">Everyone gets a “CHARGE YOUR SHIT!” buzz at 8pm the night before a practice or gig.${mgr ? ' Managers also get one when a website inquiry comes in, and a morning heads-up when a deadline is due or overdue.' : ''} Turn it on separately on each phone or iPad. On iPhone/iPad it only works in the Home Screen app (iOS 16.4 or newer).</p>
     <div class="row" style="margin-top:6px"><button class="btn" id="pushBtn" data-act="push-toggle" aria-pressed="false">Checking…</button><button class="btn sm" id="pushTestBtn" data-act="push-test" disabled>Send me a test</button></div>
     <div class="small muted" id="pushState" style="margin-top:8px"></div>
+    ${mgr ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)"><b>Send a notification to the band</b>
+      <div class="small muted">Goes right now to every active member’s phones and iPads that have notifications on, and tells you who it didn’t reach.</div>
+      <textarea class="in" id="pushMsg" rows="2" maxlength="300" placeholder="e.g. Practice moved to 7pm tonight" style="margin-top:8px;width:100%;resize:vertical"></textarea>
+      <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><button class="btn sm gold" data-act="push-send">Send to everyone</button><button class="btn sm" data-act="push-charge">Send “CHARGE YOUR SHIT!” now</button></div>
+      <div class="small muted" id="pushSendState" style="margin-top:8px"></div></div>` : ''}
   </section>` : ''}`, 'prefs', ['Page-turner pedal', 'Phone notifications']);
 }
 function trashPanel() {
@@ -2770,6 +2775,19 @@ async function pushTest() {
   try { await pushSave(sub); const r = await fetch(pushUrl('event=test&member=' + S.me.id)), j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Push error ' + r.status); toast(j.sent ? 'Test sent — watch for it' : j.failed ? 'Apple/Google refused the test (' + j.failed + ' device) — turn notifications off and on again here.' : 'No devices to send to', !j.sent); }
   catch (e) { toast(e.message || 'Couldn’t send the test.', true); }
 }
+async function pushBand(charge) {                                     // managers: send a notification to every member right now
+  if (!isMgr()) return; const ta = $('#pushMsg'), out = $('#pushSendState'), msg = ta ? ta.value.trim() : '';
+  if (!charge && !msg) { toast('Type a message first.', true); if (ta) ta.focus(); return; }
+  if (!confirm(charge ? 'Send “CHARGE YOUR SHIT!” to the whole band now?' + (msg ? '\n\n' + msg : '') : 'Send this to the whole band now?\n\n' + msg)) return;
+  if (out) out.textContent = 'Sending…';
+  try {
+    const r = await fetch(pushUrl('event=msg&from=' + S.me.id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: msg, charge: !!charge }) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error === 'unknown event' ? 'Redeploy the band-push function first (it doesn’t know band messages yet).' : j.error || 'Push error ' + r.status);
+    const miss = (j.missing || []), got = (j.reached || []).length;
+    const note = `Sent to ${got} member${got === 1 ? '' : 's'} (${j.sent || 0} device${j.sent === 1 ? '' : 's'}).` + (miss.length ? ` <b>Didn’t reach:</b> ${esc(miss.join(', '))} — they need to turn notifications on under Band → My preferences (Home Screen app on iPhone).` : ' Everyone has it.');
+    if (out) out.innerHTML = note; toast(got ? 'Sent' : 'Nobody has notifications on yet', !got); if (got && ta) ta.value = '';
+  } catch (e) { if (out) out.textContent = ''; toast(e.message || 'Couldn’t send.', true); }
+}
 function foldPanels(html, prefix, only) {
   const t = document.createElement('template'); t.innerHTML = html;
   [...t.content.querySelectorAll('section.panel')].forEach(sec => {
@@ -2955,7 +2973,7 @@ const ACTIONS = {
   'client-edit': ({ id }) => openModal(clientModal(byId('clients', id))),
   'push-nag-on': async () => { await pushOn(); pushNag(); const el = $('#pushNag'); if (el && (await pushSub())) el.innerHTML = ''; },
   'push-nag-later': () => { UI.pushNagUntil = iso(new Date(today().getTime() + 14 * 864e5)); keepUI(); const el = $('#pushNag'); if (el) el.innerHTML = ''; },
-  'push-toggle': async () => { (await pushSub()) ? pushOff() : pushOn(); }, 'push-test': () => pushTest(),
+  'push-toggle': async () => { (await pushSub()) ? pushOff() : pushOn(); }, 'push-test': () => pushTest(), 'push-send': () => pushBand(false), 'push-charge': () => pushBand(true),
   'att-snooze': ({ el, e }) => { e.preventDefault(); openModal(snoozeModal(el.dataset.k)); },
   'att-snooze-set': async ({ el }) => { const days = Number(el.dataset.v), until = days ? iso(new Date(today().getTime() + days * 864e5)) : null;
     if (await guard(() => save('attn_snooze', { key: el.dataset.k, until, member_id: S.me ? S.me.id : null }), days ? `Snoozed until ${mdY(until)}` : 'Hidden for good')) { closeModal(); render(); } },
