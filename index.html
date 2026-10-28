@@ -386,7 +386,7 @@ a.back:active{background:rgba(var(--fg),.14)}
 .gm-title{flex:1;min-width:0}.gm-t1{font-weight:800;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gm-t2{font-size:12px;color:var(--muted)}
 .gm-btn{min-width:46px;height:44px;padding:0 10px;border-radius:12px;border:1px solid var(--line);background:rgba(var(--fg),.08);color:var(--cream);font-size:16px;font-weight:700;font-family:inherit}
 .gm-awake{background:none;border:0;font-size:12px;font-family:inherit;color:var(--muted);padding:6px}
-.gm-view{flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;background:var(--gmview);display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:6px}
+.gm-view{flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;background:var(--gmview);display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:6px;touch-action:pan-x pan-y}
 .gm-page{background:#fff;display:block;flex:none;margin:0 auto}
 .gm-msg{margin:auto;text-align:center;color:var(--muted);padding:24px;line-height:1.5}
 .gm-card{margin:auto;text-align:center;padding:24px;line-height:1.7;font-size:18px}.gm-big{font-family:var(--display);font-weight:800;font-size:clamp(30px,8vw,56px);color:var(--gold);line-height:1.1}.gm-bigsub{font-size:24px;margin:6px 0 10px}
@@ -424,7 +424,7 @@ main{padding-bottom:72px}
 @media (min-width:700px){ .top{padding-top:calc(env(safe-area-inset-top,0px) + var(--hdr,56px))} .tabbar{bottom:calc(var(--lift,0px) - 24px);padding-bottom:calc(24px + var(--ftr,14px))} }   /* --ftr = how far the icons sit above the screen edge */
 /* ---------- pencil markup ---------- */
 .gm-pg{position:relative;flex:none;margin:0 auto}
-.gm-slot{width:100%;flex:none;display:flex;align-items:center;justify-content:center}
+.gm-slot{min-width:100%;width:max-content;flex:none;display:flex;align-items:center;justify-content:center}   /* grows with a zoomed page so its left edge can scroll into view */
 .gm-view.paged{gap:0;padding:0;scroll-snap-type:y mandatory}
 .gm-view.paged .gm-slot{scroll-snap-align:start;scroll-snap-stop:always}
 .gm-pen .gm-view.paged{scroll-snap-type:none}
@@ -561,6 +561,6 @@ if(h)document.documentElement.style.setProperty('--top-h',h.offsetHeight+'px');}
 new MutationObserver(m).observe(app,{childList:true});addEventListener('resize',m);addEventListener('orientationchange',m);m();})();</script>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=88"></script>
+<script src="app.js?v=89"></script>
 </body>
 </html>

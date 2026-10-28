@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 88;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 89;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -2354,7 +2354,7 @@ function gmClear() {
 
 /* ============================================================ gig mode */
 const GM = { open: false, seq: [], i: 0, zoom: 1, tok: 0, lid: null, preview: false, lock: null, awake: false, doc: null, drawer: false };
-const GM_ZOOM = [1, 1.25, 1.5, 2, 2.5, 3];
+const GM_ZOOM = [1, 1.25, 1.5, 2, 2.5, 3], GM_ZMAX = 3;
 function gmSeq(L) { return itemsOf(L.id).filter(i => i.played).sort((a, b) => a.set_no - b.set_no || a.position - b.position).map(i => ({ item: i, song: byId('songs', i.song_id), set: i.set_no })); }
 function openGigMode(seq, lid, opts = {}) {
   if (!seq.length) return toast('Add songs first.', true);
@@ -2378,7 +2378,7 @@ function openGigMode(seq, lid, opts = {}) {
   focusKeys();
   let pgT = null; d.querySelector('#gmView').addEventListener('scroll', () => { clearTimeout(pgT); pgT = setTimeout(gmPageInd, 120); });
   let rzT = null; GM.onResize = () => { clearTimeout(rzT); rzT = setTimeout(() => { if (GM.open) gmLoadChart(); }, 250); }; window.addEventListener('resize', GM.onResize);
-  const gv = d.querySelector('#gmView'); ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach(t => gv.addEventListener(t, gmPtr)); gv.addEventListener('contextmenu', e => { if (GMK.on) e.preventDefault(); });
+  const gv = d.querySelector('#gmView'); ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach(t => gv.addEventListener(t, gmPtr)); gmPinchInit(gv); gv.addEventListener('contextmenu', e => { if (GMK.on) e.preventDefault(); });
   GMK.on = false; GMK.cur = null; marksSync();
   mediaOff(); if (UI.media) mediaOn(d => gmTurn(d === 'next' ? 1 : -1));
   const meRow = (S.me && S.members.find(m => m.id === S.me.id)) || S.me || {};
@@ -2500,7 +2500,7 @@ function gmPageIdx(v, slots) {                                       // which pa
 }
 function gmGoTo(v, slot) { const top = slot.getBoundingClientRect().top - v.getBoundingClientRect().top + v.scrollTop; if (v.scrollTo) v.scrollTo({ top, behavior: 'smooth' }); else v.scrollTop = top; }
 function gmSnap() { const v = $('#gmView'); if (!v || GM.zoom !== 1) return; const slots = [...v.querySelectorAll('.gm-slot')]; if (slots.length) gmGoTo(v, slots[gmPageIdx(v, slots)]); }
-function gmPageInd() { const el = $('#gmPg'), v = $('#gmView'); if (!el || !v) return; const slots = [...v.querySelectorAll('.gm-slot')]; el.textContent = slots.length > 1 && GM.zoom === 1 ? ` · page ${gmPageIdx(v, slots) + 1}/${slots.length}` : ''; }
+function gmPageInd() { const el = $('#gmPg'), v = $('#gmView'); if (!el || !v) return; const slots = [...v.querySelectorAll('.gm-slot')]; el.textContent = GM.zoom !== 1 ? ` · ${Math.round(GM.zoom * 100)}%` : slots.length > 1 ? ` · page ${gmPageIdx(v, slots) + 1}/${slots.length}` : ''; }
 /* Bluetooth page-turner pedals send ordinary keys. Normal size: one press = one whole page, and after the last page it moves to the next song.
    Zoomed in (A+): one press scrolls most of a screen instead. */
 function gmTurn(dir) {
@@ -2582,7 +2582,8 @@ function gmClick(e) {
   else if (a === 'mode') { gmTextCommit(); const v = el.dataset.v; if (v === 'text') GMK.tool = 'text'; else { GMK.input = v; UI.editInput = v; keepUI(); if (GMK.tool === 'text') GMK.tool = 'pen'; } $('#gmTools').innerHTML = gmToolsHtml(); }
   else if (a === 'tsz') { GMK.tsz = Number(el.dataset.v); $('#gmTools').innerHTML = gmToolsHtml(); }
   else if (a === 'undo') { gmTextCommit(); gmUndo(); } else if (a === 'clear') { gmTextCommit(); gmClear(); }
-  else if (a === 'zoom-in' || a === 'zoom-out') { const k = GM_ZOOM.indexOf(GM.zoom); GM.zoom = GM_ZOOM[Math.max(0, Math.min(GM_ZOOM.length - 1, k + (a === 'zoom-in' ? 1 : -1)))]; gmLoadChart(); }
+  else if (a === 'zoom-in') gmZoomTo(GM_ZOOM.find(s => s > GM.zoom + 0.01) || GM_ZMAX);
+  else if (a === 'zoom-out') gmZoomTo([...GM_ZOOM].reverse().find(s => s < GM.zoom - 0.01) || 1);
   else if (a === 'list') { GM.drawer = !GM.drawer; gmDrawer(); }
   else if (a === 'go') { GM.drawer = false; gmDrawer(); gmShow(Number(el.dataset.i)); }
   else if (a === 'awake') toast(GM.awake ? 'Screen stays on while gig mode is open.' : 'This phone won’t let a web page keep the screen on (iOS Home Screen apps need iOS 18.4 or newer). Set Settings → Display & Brightness → Auto-Lock → Never for the gig.', !GM.awake);
@@ -2603,7 +2604,7 @@ function gmShow(i, toEnd) {
 }
 function gmBottom() {
   const cur = GM.seq[GM.i], nxt = GM.seq[GM.i + 1], s = cur.song || {};
-  if (GM.isDoc) return `<div class="gm-info"><b>${esc(GM.isDoc.title)}</b> <span class="gm-bits">${esc(GM.isDoc.sub)} · swipe up for the next page · A+ to zoom</span></div>`;
+  if (GM.isDoc) return `<div class="gm-info"><b>${esc(GM.isDoc.title)}</b> <span class="gm-bits">${esc(GM.isDoc.sub)} · swipe up for the next page · pinch or A+ to zoom</span></div>`;
   if (GM.preview) return `<div class="gm-info"><b>${esc(s.title || '')}</b> <span class="gm-bits">Key ${esc(s.song_key || '?')}${s.capo ? ' · capo ' + s.capo : ''}${s.bpm ? ' · ♩ ' + s.bpm + ' BPM' : ''}${s.starter ? ' · Starts: ' + esc(s.starter) : ''}${s.lead_vox ? ' · Lead: ' + esc(s.lead_vox) : ''}</span></div>`;
   const say = cur.item && cur.item.note;
   let next;
@@ -2623,30 +2624,79 @@ function gmNoChart(cur) {
   const s = cur.song || {};
   return `<div class="gm-card"><div class="gm-big">${esc(s.title || '')}</div><div class="gm-bigsub">Key ${esc(s.song_key || '?')}${s.capo ? ' · capo ' + s.capo : ''}</div>${s.starter ? `<div>Starts: <b>${esc(s.starter)}</b></div>` : ''}${s.lead_vox ? `<div>Lead vocal: ${esc(s.lead_vox)}</div>` : ''}${s.comment ? `<div class="muted" style="margin-top:8px">${esc(s.comment)}</div>` : ''}<div class="muted" style="margin-top:14px">No PDF chart for you on this one yet.</div></div>`;
 }
-async function gmLoadChart() {
-  GM.pageCount = 0; const tok = ++GM.tok, cur = GM.seq[GM.i], v = $('#gmView'); if (!v) return; v.scrollTop = 0; v.scrollLeft = 0;
-  if (metroBig()) { v.innerHTML = ''; GM.pgs = []; return; }                // the big metronome light is covering it; loads when the chart comes back
+/* ---- zoom: pinch with two fingers (or A− / A+). The pages stretch live under your fingers, then re-draw sharp at the new size
+   with the spot you pinched on still under your fingers. */
+const gmFree = el => el.querySelectorAll('canvas').forEach(c => { c.width = 0; c.height = 0; });   // iPad Safari only frees canvas memory this way
+function gmAnchor(v, x, y) {                                        // which page, and where on it (as fractions), is at screen point x,y
+  const ws = (GM.pgs || []).map(p => p.ov.parentElement.getBoundingClientRect()); if (!ws.length) return null;
+  const off = b => y < b.top ? b.top - y : y > b.bottom ? y - b.bottom : 0;
+  const k = ws.reduce((best, b, i) => off(b) < off(ws[best]) ? i : best, 0), b = ws[k], cl = n => Math.max(0, Math.min(1, n));
+  return { k, fx: cl((x - b.left) / b.width), fy: cl((y - b.top) / b.height) };
+}
+function gmZoomTo(z, P) {
+  const v = $('#gmView'); if (!v) return; gmTextCommit();
+  z = z < 1.08 ? 1 : Math.min(GM_ZMAX, Math.round(z * 100) / 100);
+  const r = v.getBoundingClientRect(), x = P ? P.x : r.left + r.width / 2, y = P ? P.y : r.top + r.height / 2, a = P ? P.a : gmAnchor(v, x, y);
+  if (Math.abs(z - GM.zoom) < 0.02) { v.querySelectorAll('.gm-slot').forEach(sl => { sl.style.transform = ''; sl.style.willChange = ''; }); v.style.scrollSnapType = ''; return; }
+  GM.zoom = z; gmLoadChart({ keep: true, at: a ? { ...a, x, y } : null });
+}
+function gmPinchInit(v) {
+  let P = null;
+  const mid = t => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2, d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) });
+  const slots = () => [...v.querySelectorAll('.gm-slot')];
+  v.addEventListener('touchstart', e => {
+    if (e.touches.length !== 2 || P || GMK.cur || GMK.edit || !(GM.pgs || []).length) return;
+    const p = mid(e.touches); GMK.scroll = null; GMK.tap = null;           // two fingers: this is a zoom, not a scroll or a tap
+    P = { x0: p.x, y0: p.y, d0: Math.max(p.d, 1), s: 1, x: p.x, y: p.y, a: gmAnchor(v, p.x, p.y) };
+    slots().forEach(sl => { const b = sl.getBoundingClientRect(); sl.style.transformOrigin = `${p.x - b.left}px ${p.y - b.top}px`; sl.style.willChange = 'transform'; });
+    v.style.scrollSnapType = 'none'; e.preventDefault();
+  }, { passive: false });
+  v.addEventListener('touchmove', e => {
+    if (!P) return; e.preventDefault(); if (e.touches.length < 2) return;
+    const p = mid(e.touches); P.s = Math.max(0.5 / GM.zoom, Math.min(GM_ZMAX * 1.15 / GM.zoom, p.d / P.d0)); P.x = p.x; P.y = p.y;
+    const tr = `translate(${p.x - P.x0}px,${p.y - P.y0}px) scale(${P.s})`; slots().forEach(sl => { sl.style.transform = tr; });
+  }, { passive: false });
+  const end = e => { if (!P || e.touches.length >= 2) return; const p = P; P = null; gmZoomTo(GM.zoom * p.s, p); };
+  v.addEventListener('touchend', end); v.addEventListener('touchcancel', end);
+  v.addEventListener('gesturestart', e => e.preventDefault());       // stop Safari zooming the whole app instead
+}
+async function gmLoadChart(opts = {}) {
+  GM.pageCount = 0; const tok = ++GM.tok, cur = GM.seq[GM.i], v = $('#gmView'); if (!v) return;
+  const keep = !!(opts.keep && v.querySelector('.gm-pg'));          // re-zoom: leave the stretched pages up until the sharp ones are ready (no "Loading" flash)
+  if (!keep) { v.scrollTop = 0; v.scrollLeft = 0; }
+  if (metroBig()) { gmFree(v); v.innerHTML = ''; GM.pgs = []; return; }                // the big metronome light is covering it; loads when the chart comes back
   const ch = cur.forceChart ? { chart: cur.forceChart } : (cur.song ? chartFor(cur.song.id) : null);
-  if (!ch) { v.innerHTML = gmNoChart(cur); return; }
-  v.innerHTML = '<div class="gm-msg">Loading chart…</div>';
+  if (!ch) { gmFree(v); v.innerHTML = gmNoChart(cur); return; }
+  if (!keep) { gmFree(v); v.innerHTML = '<div class="gm-msg">Loading chart…</div>'; }
   try {
     const [lib, buf] = await Promise.all([loadPdfJs(), chartData(ch.chart)]); if (tok !== GM.tok) return;
     const pdf = await lib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise; if (tok !== GM.tok) { pdf.destroy(); return; }
     if (GM.doc) { try { GM.doc.destroy(); } catch {} } GM.doc = pdf;
-    const paged = GM.zoom === 1; v.classList.toggle('paged', paged);                   // normal size: one whole page per screen
-    v.innerHTML = ''; GM.pgs = []; const W = v.clientWidth - (paged ? 0 : 12), H = v.clientHeight - (paged ? 0 : 12), dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const paged = GM.zoom === 1;                                                       // normal size: one whole page per screen
+    const W = v.clientWidth - (paged ? 0 : 12), H = v.clientHeight - (paged ? 0 : 12), dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const box = keep ? document.createElement('div') : v, pgs = [];
+    if (!keep) { v.classList.toggle('paged', paged); v.innerHTML = ''; GM.pgs = pgs; }
     for (let n = 1; n <= pdf.numPages; n++) {
       const page = await pdf.getPage(n); if (tok !== GM.tok) return;
       const v0 = page.getViewport({ scale: 1 });
-      const fitW = Math.min(W, H * v0.width / v0.height), w = fitW * GM.zoom;                                  // A+ / A− scale up from the whole-page fit
-      const vp = page.getViewport({ scale: w / v0.width * dpr });
-      const cv = document.createElement('canvas'); cv.className = 'gm-page'; cv.width = Math.floor(vp.width); cv.height = Math.floor(vp.height); cv.style.width = vp.width / dpr + 'px'; cv.style.height = vp.height / dpr + 'px';
-      const cssW = vp.width / dpr, cssH = vp.height / dpr, wrap = document.createElement('div'), ov = document.createElement('canvas');
+      const fitW = Math.min(W, H * v0.width / v0.height), w = fitW * GM.zoom;                                  // pinch / A+ / A− scale up from the whole-page fit
+      const sc = w / v0.width, cssW = v0.width * sc, cssH = v0.height * sc, area = cssW * cssH;
+      const pdpr = Math.min(dpr, Math.sqrt(12e6 / area)), odpr = Math.min(pdpr, Math.sqrt(6e6 / area));      // iPads go blank past ~16M pixels a canvas: cap it when zoomed way in
+      const vp = page.getViewport({ scale: sc * pdpr });
+      const cv = document.createElement('canvas'); cv.className = 'gm-page'; cv.width = Math.floor(vp.width); cv.height = Math.floor(vp.height); cv.style.width = cssW + 'px'; cv.style.height = cssH + 'px';
+      const wrap = document.createElement('div'), ov = document.createElement('canvas');
       wrap.className = 'gm-pg'; wrap.style.width = cssW + 'px'; wrap.style.height = cssH + 'px';
-      ov.className = 'gm-ov'; ov.dataset.pg = String(n - 1); ov.width = cv.width; ov.height = cv.height; ov.style.width = cssW + 'px'; ov.style.height = cssH + 'px';
+      ov.className = 'gm-ov'; ov.dataset.pg = String(n - 1); ov.width = Math.floor(cssW * odpr); ov.height = Math.floor(cssH * odpr); ov.style.width = cssW + 'px'; ov.style.height = cssH + 'px';
       const slot = document.createElement('div'); slot.className = 'gm-slot'; if (paged) slot.style.height = v.clientHeight + 'px';
-      wrap.append(cv, ov); slot.appendChild(wrap); v.appendChild(slot); GM.pgs.push({ ov, w: cssW, h: cssH, dpr });
+      wrap.append(cv, ov); slot.appendChild(wrap); box.appendChild(slot); pgs.push({ ov, w: cssW, h: cssH, dpr: odpr });
       await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+    }
+    if (keep) { gmFree(v); v.classList.toggle('paged', paged); v.style.scrollSnapType = ''; v.replaceChildren(...box.childNodes); GM.pgs = pgs; }
+    const at = opts.at, tp = at && pgs[at.k];
+    if (tp) {                                                         // keep the pinched spot under the fingers
+      const b = tp.ov.parentElement.getBoundingClientRect(), vr = v.getBoundingClientRect();
+      if (paged) v.scrollTop += tp.ov.parentElement.parentElement.getBoundingClientRect().top - vr.top;
+      else { v.scrollLeft += b.left + at.fx * b.width - at.x; v.scrollTop += b.top + at.fy * b.height - at.y; }
     }
     GM.pageCount = pdf.numPages; if (GM.landEnd) { GM.landEnd = false; v.scrollTop = v.scrollHeight; } gmPageInd();
     await gmMarksLoad(tok);
