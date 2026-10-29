@@ -368,7 +368,7 @@ body.cb .toast.err{background:var(--bad);color:#140e02}
 a.back{display:inline-flex;align-items:center;gap:6px;font-size:16px;font-weight:600;color:var(--cream);text-decoration:none;padding:9px 16px 9px 12px;border-radius:999px;background:rgba(var(--fg),.07);border:1px solid var(--line)}
 a.back:active{background:rgba(var(--fg),.14)}
 .sec2{font-family:var(--display);font-stretch:112%;font-weight:800;color:var(--gold);font-size:clamp(22px,3.4vw,32px);margin:30px 0 14px;line-height:1.1}
-.up-scroll{max-height:400px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;margin-right:-6px;padding-right:6px}
+.up-scroll{max-height:400px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;margin-right:-4px;padding-right:16px}   /* room between the scroll bar and the $ amounts */
 .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:10px}
 .photos .ph{position:relative}
 .photos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:rgba(var(--fg),.05);cursor:zoom-in;display:block}
@@ -561,6 +561,6 @@ if(h)document.documentElement.style.setProperty('--top-h',h.offsetHeight+'px');}
 new MutationObserver(m).observe(app,{childList:true});addEventListener('resize',m);addEventListener('orientationchange',m);m();})();</script>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=89"></script>
+<script src="app.js?v=90"></script>
 </body>
 </html>

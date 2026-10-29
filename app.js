@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 89;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 90;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1771,14 +1771,14 @@ function prefsView() {
   return foldPanels(`${title('Prefs')}
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="f" style="margin-bottom:14px;max-width:320px">Appearance<select class="in" data-theme-pick>${[['dark', 'Dark'], ['light', 'Light'], ['auto', 'Match my device']].map(([v, l]) => `<option value="${v}" ${(UI.theme || 'dark') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-    <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b><div class="small muted" style="margin-top:2px">Swaps red/green cues for blue/orange and adds shapes and labels so color is never the only signal. Saved on this device.</div></span></label>
+    <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b></span></label>
     ${(() => { if (!S.me) return ''; const st = settings(), off = Array.isArray(st.digest_optout) && st.digest_optout.includes(S.me.id);
       return `<div class="f" style="margin-top:14px;max-width:520px"><span>Weekly digest email</span>
-      <label class="check" style="align-items:flex-start"><input type="checkbox" data-digest-on ${off ? '' : 'checked'}><span>Email me the Monday digest<div class="small muted">This week’s gigs and practices, what needs attention, and (for managers) money owed. Sent to ${esc(S.me.email || 'the email on your roster entry — add it under Admin → Roster')}.</div></span></label>
+      <label class="check" style="align-items:flex-start"><input type="checkbox" data-digest-on ${off ? '' : 'checked'}><span>Email me the Monday digest</span></label>
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="digest-preview">Preview</button><button class="btn sm" data-act="digest-test">Send me a test now</button></div></div>`; })()}
-    ${(() => { const cur = fitOf(); return `<label class="f" style="margin-top:14px;max-width:320px">Screen fit<select class="in" data-text-size>${cur === 'custom' ? '<option value="custom" selected>Custom (your earlier settings)</option>' : ''}${Object.entries(FITS).map(([k, f]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${f.label}</option>`).join('')}</select></label><div class="small muted" style="margin-top:4px">Sets text size and how much room the header and tab bar leave on an iPad.</div>`; })()}
+    ${(() => { const cur = fitOf(); return `<label class="f" style="margin-top:14px;max-width:320px">Screen fit<select class="in" data-text-size>${cur === 'custom' ? '<option value="custom" selected>Custom (your earlier settings)</option>' : ''}${Object.entries(FITS).map(([k, f]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${f.label}</option>`).join('')}</select></label>`; })()}
     ${(() => { if (!S.me) return ''; const cur = S.chart_defaults.find(d => d.member_id === S.me.id), ids = new Set(S.song_charts.filter(c => c.member_id !== S.me.id).map(c => c.member_id)); if (cur) ids.add(cur.use_member_id); const mine = S.song_charts.filter(c => c.member_id === S.me.id).length;
-      return `<label class="f" style="margin-top:14px">When I don’t have my own chart for a song, use…<select class="in" data-chart-default><option value="">Nobody’s (leave it blank)</option>${[...ids].map(id => `<option value="${id}" ${cur && cur.use_member_id === id ? 'selected' : ''}>${esc((byId('members', id) || {}).name || 'Bandmate')}’s chart</option>`).join('')}</select></label><div class="small muted" style="margin-top:4px">You have ${mine} chart${mine === 1 ? '' : 's'} of your own. You can still pick a different chart song by song from the song’s page.</div>`; })()}
+      return `<label class="f" style="margin-top:14px">When I don’t have my own chart for a song, use…<select class="in" data-chart-default><option value="">Nobody’s (leave it blank)</option>${[...ids].map(id => `<option value="${id}" ${cur && cur.use_member_id === id ? 'selected' : ''}>${esc((byId('members', id) || {}).name || 'Bandmate')}’s chart</option>`).join('')}</select></label>`; })()}
   </section>
   <section class="team" style="margin-bottom:18px">${ms.filter(m => m.active).map(m => `<div class="mate"><img src="${photo(m)}" alt="${esc(m.name)}"><div class="plate"><small>${esc(m.instrument || '')}</small>${esc(m.name)}</div></div>`).join('')}</section>
   <section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Page-turner pedal</h2>
@@ -1791,14 +1791,10 @@ function prefsView() {
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
   </section>
   ${S.me ? `<section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Phone notifications</h2>
-    <p class="small muted" style="margin-top:0">Everyone gets a “CHARGE YOUR SHIT!” buzz at 8pm the night before a practice or gig.${mgr ? ' Managers also get one when a website inquiry comes in, and a morning heads-up when a deadline is due or overdue.' : ''} Turn it on separately on each phone or iPad. On iPhone/iPad it only works in the Home Screen app (iOS 16.4 or newer).</p>
+    <p class="small muted" style="margin-top:0">Subscribe to helpful band notifications.</p>
     <div class="row" style="margin-top:6px"><button class="btn" id="pushBtn" data-act="push-toggle" aria-pressed="false">Checking…</button><button class="btn sm" id="pushTestBtn" data-act="push-test" disabled>Send me a test</button></div>
     <div class="small muted" id="pushState" style="margin-top:8px"></div>
-    ${mgr ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)"><b>Send a notification to the band</b>
-      <div class="small muted">Goes right now to every active member’s phones and iPads that have notifications on, and tells you who it didn’t reach.</div>
-      <textarea class="in" id="pushMsg" rows="2" maxlength="300" placeholder="e.g. Practice moved to 7pm tonight" style="margin-top:8px;width:100%;resize:vertical"></textarea>
-      <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><button class="btn sm gold" data-act="push-send">Send to everyone</button><button class="btn sm" data-act="push-charge">Send “CHARGE YOUR SHIT!” now</button></div>
-      <div class="small muted" id="pushSendState" style="margin-top:8px"></div></div>` : ''}
+    ${mgr ? `<div class="row" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)"><button class="btn sm gold" data-act="push-compose">📣 Send a notification to the band</button></div>` : ''}
   </section>` : ''}`, 'prefs', ['Page-turner pedal', 'Phone notifications']);
 }
 function trashPanel() {
@@ -1851,7 +1847,7 @@ function adminView() {
   const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}"></label>`;
   return foldPanels(`${title('Admin')}
   <div class="small faint" style="margin:-6px 0 14px">App version ${APP_V} · ${displayInfo()} · <a href="#" data-act="app-refresh">Update app files now</a></div>
-  <label class="check" style="margin:0 0 16px;align-items:flex-start"><input type="checkbox" data-edit-mode ${UI.editMode ? 'checked' : ''}><span><b>Edit mode</b><div class="small muted" style="margin-top:2px">Gigs, practices, setlists and songs open straight into Edit when you tap them. Saved on this device.</div></span></label>
+  <label class="check" style="margin:0 0 16px;align-items:flex-start"><input type="checkbox" data-edit-mode ${UI.editMode ? 'checked' : ''}><span><b>Edit mode</b></span></label>
   <div class="grid g2">
     <section class="panel"><div class="row"><h2 class="sec" style="margin:0">Clients</h2><span class="spacer"></span><button class="btn sm gold" data-act="client-new">+ New client</button></div>
       <div class="list" style="margin-top:8px">${S.clients.slice().sort((a, b) => (a.org || a.contact_name || '').localeCompare(b.org || b.contact_name || '')).map(c => { const n = S.gigs.filter(g => g.client_id === c.id).length; return `<div class="li" data-act="client-edit" data-id="${c.id}" style="cursor:pointer"><div class="grow"><div class="t">${esc(c.org || c.contact_name)}</div><div class="s">${esc([c.contact_name, c.email, c.phone].filter(Boolean).join(' · '))}</div></div><span class="small muted">${esc(c.code || '')} · ${n} gig${n === 1 ? '' : 's'}</span></div>`; }).join('') || '<div class="empty">No clients yet — add one here, or from a gig.</div>'}</div>
@@ -2825,6 +2821,14 @@ async function pushTest() {
   try { await pushSave(sub); const r = await fetch(pushUrl('event=test&member=' + S.me.id)), j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Push error ' + r.status); toast(j.sent ? 'Test sent — watch for it' : j.failed ? 'Apple/Google refused the test (' + j.failed + ' device) — turn notifications off and on again here.' : 'No devices to send to', !j.sent); }
   catch (e) { toast(e.message || 'Couldn’t send the test.', true); }
 }
+function pushComposeModal() {                                       // managers: write a band-wide notification (a pop-up, so the phone keyboard and tab bar never cover the buttons)
+  return `<div class="scrim" data-act="modal-close"><div class="modal" data-stop style="width:min(520px,100%)">
+    <div class="row"><h2 class="sec" style="margin:0">Notify the band</h2><span class="spacer"></span><button class="btn ghost" data-act="modal-close" aria-label="Close">✕</button></div>
+    <textarea class="in" id="pushMsg" rows="3" maxlength="300" placeholder="e.g. Practice moved to 7pm tonight" style="margin-top:12px;width:100%;resize:vertical"></textarea>
+    <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn gold" data-act="push-send">Send to everyone</button><button class="btn" data-act="push-charge">Send “CHARGE YOUR SHIT!”</button></div>
+    <div class="small muted" id="pushSendState" style="margin-top:10px">Goes right away to every member with notifications on. You’ll see who it didn’t reach.</div>
+  </div></div>`;
+}
 async function pushBand(charge) {                                     // managers: send a notification to every member right now
   if (!isMgr()) return; const ta = $('#pushMsg'), out = $('#pushSendState'), msg = ta ? ta.value.trim() : '';
   if (!charge && !msg) { toast('Type a message first.', true); if (ta) ta.focus(); return; }
@@ -2834,7 +2838,7 @@ async function pushBand(charge) {                                     // manager
     const r = await fetch(pushUrl('event=msg&from=' + S.me.id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: msg, charge: !!charge }) });
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error === 'unknown event' ? 'Redeploy the band-push function first (it doesn’t know band messages yet).' : j.error || 'Push error ' + r.status);
     const miss = (j.missing || []), got = (j.reached || []).length;
-    const note = `Sent to ${got} member${got === 1 ? '' : 's'} (${j.sent || 0} device${j.sent === 1 ? '' : 's'}).` + (miss.length ? ` <b>Didn’t reach:</b> ${esc(miss.join(', '))} — they need to turn notifications on under Band → My preferences (Home Screen app on iPhone).` : ' Everyone has it.');
+    const note = `Sent to ${got} member${got === 1 ? '' : 's'} (${j.sent || 0} device${j.sent === 1 ? '' : 's'}).` + (miss.length ? ` <b>Didn’t reach:</b> ${esc(miss.join(', '))} — they need to turn notifications on under Prefs → Phone notifications (Home Screen app on iPhone).` : ' Everyone has it.');
     if (out) out.innerHTML = note; toast(got ? 'Sent' : 'Nobody has notifications on yet', !got); if (got && ta) ta.value = '';
   } catch (e) { if (out) out.textContent = ''; toast(e.message || 'Couldn’t send.', true); }
 }
@@ -3023,7 +3027,7 @@ const ACTIONS = {
   'client-edit': ({ id }) => openModal(clientModal(byId('clients', id))),
   'push-nag-on': async () => { await pushOn(); pushNag(); const el = $('#pushNag'); if (el && (await pushSub())) el.innerHTML = ''; },
   'push-nag-later': () => { UI.pushNagUntil = iso(new Date(today().getTime() + 14 * 864e5)); keepUI(); const el = $('#pushNag'); if (el) el.innerHTML = ''; },
-  'push-toggle': async () => { (await pushSub()) ? pushOff() : pushOn(); }, 'push-test': () => pushTest(), 'push-send': () => pushBand(false), 'push-charge': () => pushBand(true),
+  'push-toggle': async () => { (await pushSub()) ? pushOff() : pushOn(); }, 'push-test': () => pushTest(), 'push-compose': () => openModal(pushComposeModal()), 'push-send': () => pushBand(false), 'push-charge': () => pushBand(true),
   'att-snooze': ({ el, e }) => { e.preventDefault(); openModal(snoozeModal(el.dataset.k)); },
   'att-snooze-set': async ({ el }) => { const days = Number(el.dataset.v), until = days ? iso(new Date(today().getTime() + days * 864e5)) : null;
     if (await guard(() => save('attn_snooze', { key: el.dataset.k, until, member_id: S.me ? S.me.id : null }), days ? `Snoozed until ${mdY(until)}` : 'Hidden for good')) { closeModal(); render(); } },
