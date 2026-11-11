@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 94;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 95;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1706,21 +1706,19 @@ function yearChart(data) {
   const inc = d => d.pay + d.tips + d.merch, BLUE = isLight() ? '#2c67a8' : '#8fb8e8';
   const nice = m => { const e = Math.pow(10, Math.floor(Math.log10(m || 1))), f = m / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 4 ? 4 : f <= 5 ? 5 : 10) * e; };
   const topI = nice(Math.max(...data.map(inc), 1)), topN = Math.max(4, Math.ceil(Math.max(...data.map(d => d.n), 1) / 4) * 4);
-  const W = 640, H = 310, n = data.length, kf = v => v >= 1000 ? '$' + +(v / 1000).toFixed(1) + 'k' : '$' + Math.round(v), tickI = k => kf(topI * k / 4), tickN = k => String(Math.round(topN * k / 4));
-  const pl = 16 + 14 * Math.max(6, ...[0, 1, 2, 3, 4].map(k => tickI(k).length)), pr = 16 + 14 * Math.max(4, String(topN).length), pt = 54, pb = 62;   // pt: the Income / Gigs headings sit above the top line   // side margins sized to the labels so nothing is clipped
+  const kf = v => v >= 1000 ? '$' + +(v / 1000).toFixed(1) + 'k' : '$' + Math.round(v), tickI = k => kf(topI * k / 4), tickN = k => String(Math.round(topN * k / 4));
+  // side margins sized to the tick labels (17 units a character covers phone-size text); the values sit under each year, never on the lines
+  const W = 640, H = 360, n = data.length, pl = 20 + 17 * Math.max(...[0, 1, 2, 3, 4].map(k => tickI(k).length)), pr = 20 + 17 * String(topN).length, pt = 16, pb = 128;
   const x = i => pl + (W - pl - pr) * (i + .5) / n, yI = v => pt + (H - pt - pb) * (1 - v / topI), yN = v => pt + (H - pt - pb) * (1 - v / topN);
-  let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:10px" role="img" aria-label="Income and gig count by year">`;
+  let s = `<div class="row" style="justify-content:space-between;margin-top:10px;font-size:13px;font-weight:700"><span style="color:var(--gold)">Income</span><span style="color:${BLUE}">Gigs</span></div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:4px" role="img" aria-label="Income and gig count by year">`;
   for (let k = 0; k <= 4; k++) { const y = pt + (H - pt - pb) * (1 - k / 4);
-    s += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" style="stroke:rgba(var(--fg),.08)"/><text x="${pl - 7}" y="${y}" dy=".35em" text-anchor="end" style="fill:var(--gold)">${tickI(k)}</text><text x="${W - pr + 7}" y="${y}" dy=".35em" style="fill:${BLUE}">${tickN(k)}</text>`; }
-  s += `<text x="${pl - 7}" y="2" dy=".8em" text-anchor="end" style="fill:var(--gold);font-weight:700">Income</text><text x="${W - pr + 7}" y="2" dy=".8em" style="fill:${BLUE};font-weight:700">Gigs</text>`;
-  data.forEach((d, i) => { s += `<text x="${x(i)}" y="${H - pb + 22}" dy=".95em" text-anchor="middle">${d.y}</text>`; });
+    s += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" style="stroke:rgba(var(--fg),.08)"/><text x="${pl - 8}" y="${y}" dy=".35em" text-anchor="end" style="fill:var(--gold)">${tickI(k)}</text><text x="${W - pr + 8}" y="${y}" dy=".35em" style="fill:${BLUE}">${tickN(k)}</text>`; }
   const line = (f, c, dash) => `<polyline points="${data.map((d, i) => x(i).toFixed(1) + ',' + f(d).toFixed(1)).join(' ')}" fill="none" stroke="${c}" stroke-width="3" stroke-linejoin="round" ${dash ? 'stroke-dasharray="7 5"' : ''}/>`;
   s += line(d => yI(inc(d)), 'var(--gold)') + line(d => yN(d.n), BLUE, true);
   data.forEach((d, i) => {
-    const yi = yI(inc(d)), yn = yN(d.n), nAbove = yn < yi, bottom = H - pb - 8;      // labels point away from each other; at an edge they slide to the side
-    const lab = (cx, cy, dy, txt, c) => { const yy = cy + dy * 1.8; return (yy > bottom || yy < pt + 4) ? `<text x="${cx + 11}" y="${cy}" dy=".35em" text-anchor="start" style="fill:${c};font-weight:700">${txt}</text>` : `<text x="${cx}" y="${cy}" dy="${dy > 0 ? '1.45em' : '-.7em'}" text-anchor="middle" style="fill:${c};font-weight:700">${txt}</text>`; };
-    s += `<circle cx="${x(i)}" cy="${yi}" r="5" fill="var(--gold)"><title>${d.y}: ${money(inc(d))} from ${d.n} gigs</title></circle>${lab(x(i), yi, nAbove ? 21 : -10, kf(inc(d)), 'var(--gold)')}`;
-    s += `<rect x="${x(i) - 5}" y="${yn - 5}" width="10" height="10" fill="${BLUE}"><title>${d.y}: ${d.n} gigs</title></rect>${lab(x(i), yn, nAbove ? -10 : 21, d.n, BLUE)}`;
+    s += `<circle cx="${x(i)}" cy="${yI(inc(d))}" r="5" fill="var(--gold)"><title>${d.y}: ${money(inc(d))} from ${d.n} gigs</title></circle><rect x="${x(i) - 5}" y="${yN(d.n) - 5}" width="10" height="10" fill="${BLUE}"><title>${d.y}: ${d.n} gigs</title></rect>`;
+    s += `<text x="${x(i)}" y="${H - pb + 20}" text-anchor="middle"><tspan x="${x(i)}" dy=".95em">${d.y}</tspan><tspan x="${x(i)}" dy="1.35em" style="fill:var(--gold);font-weight:700">${kf(inc(d))}</tspan><tspan x="${x(i)}" dy="1.25em" style="fill:${BLUE};font-weight:700">${d.n} gig${d.n === 1 ? '' : 's'}</tspan></text>`;
   });
   return s + '</svg>';
 }
