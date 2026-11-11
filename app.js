@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 90;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 91;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -408,7 +408,7 @@ function shell(route, inner) {
   <header class="top">
     <a class="brand" href="#home"><img src="assets/logo-header.png" alt="Trailer Folk"><span class="hide-sm">HQ</span></a>
     <div class="row" style="gap:0;align-items:stretch">
-      <nav class="nav">${NAV.map(([k, l]) => `<a href="#${k}" class="${on(k)}">${l}</a>`).join('')}</nav>
+      <nav class="nav">${navItems().map(([k, l]) => `<a href="#${k}" class="${on(k)}">${l}</a>`).join('')}</nav>
       <button type="button" class="srch-btn" data-act="search-open" aria-label="Search" title="Search (press /)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg></button>
       <button type="button" class="who" data-act="who-menu" title="Account">${me ? `<img src="${photo(me)}" alt=""><span class="nm small muted">${esc(me.name)}</span>` : ''}</button>
     </div>
@@ -416,7 +416,17 @@ function shell(route, inner) {
   </header>
   ${S.offline ? '<div class="offline-bar"><span>Offline — showing the data saved on this device. View only.</span><button class="btn sm" data-act="go-online">Retry</button></div>' : ''}
   <div class="scroll"><main class="view">${inner}</main></div>
-  <nav class="tabbar">${NAV.map(([k, l, i]) => `<a href="#${k}" class="${on(k)}">${ICON[i]}${l}</a>`).join('')}</nav>`;
+  <nav class="tabbar">${navItems().map(([k, l, i]) => `<a href="#${k}" class="${on(k)}">${ICON[i]}${l}</a>`).join('')}</nav>`;
+}
+const navItems = () => NAV.filter(([k]) => k !== 'admin' || isMgr());                       // Admin is for managers only
+const PENCIL = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+const titleRow = (t, right) => `<div class="title-row"><h1 class="echo disp"><span class="solid">${esc(t)}</span></h1><div class="title-acts">${right || ''}</div></div>`;
+/* a dropdown with checkboxes: pick several. key = which filter, sel = the chosen values ([] = none) */
+function msel(key, opts, sel, empty, right) {
+  const names = opts.filter(([v]) => sel.includes(v)).map(([, l]) => l);
+  const txt = !names.length ? empty : names.length <= 2 ? names.join(' + ') : `${names.length} selected`;
+  return `<details class="msel ${right ? 'r' : ''}" data-msel="${key}" ${UI._msel === key ? 'open' : ''}><summary class="in"><span class="msel-t">${esc(txt)}</span><span class="chev" aria-hidden="true">▾</span></summary>
+    <div class="msel-pop">${opts.map(([v, l]) => `<label class="check"><input type="checkbox" data-msel-k="${key}" value="${v}" ${sel.includes(v) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></details>`;
 }
 const title = (t, sub) => `<h1 class="echo disp"><span class="solid">${esc(t)}</span></h1>${sub ? `<p class="muted" style="margin:-10px 0 22px">${sub}</p>` : ''}`;
 
@@ -426,6 +436,9 @@ const cbm = good => UI.cb ? (good ? '✓ ' : '▲ ') : '';
 /* ============================================================ router */
 let UI = { gigFilter: 'upcoming', gigSearch: '', gigYear: 'all', calMonth: null, songFilter: 'active', songSearch: '', songSort: 'title', moneyYear: String(new Date().getFullYear()), selSet: 1, libFilter: 'active', libSearch: '' };
 try { Object.assign(UI, JSON.parse(localStorage.getItem('tfhq-ui') || '{}')); } catch {}
+UI.calMonth = null; UI._msel = null;                               // the calendar always opens on this month; no filter menu left open
+if (!Array.isArray(UI.gigFilters)) UI.gigFilters = ['upcoming'];
+if (!Array.isArray(UI.songFlags)) UI.songFlags = [UI.songNoChart && 'nochart', UI.songFlag].filter(Boolean);
 const isLight = () => document.documentElement.dataset.theme === 'light';
 function applyTheme() {                                                   // Prefs → Appearance: dark (default), light, or follow the device
   const pick = UI.theme || 'dark', t = pick === 'auto' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : pick;
@@ -447,10 +460,10 @@ function render() {
   if (route === 'calendar') { route = 'home'; history.replaceState(null, '', '#home'); }
   if (route === 'settings') { route = 'prefs'; history.replaceState(null, '', '#prefs'); }                // the old Band page was split into Prefs and Admin              // the calendar now lives at the bottom of Home
   const [sec, id] = route.split('/');
-  const views = { home: homeView, gigs: gigsView, gig: () => gigView(id), daysheet: () => daySheetView(id), setlists: setlistsView, setlist: () => setlistView(id), songs: songsView, money: moneyView, prefs: prefsView, admin: adminView };
+  const views = { home: homeView, gigs: gigsView, gig: () => gigView(id), daysheet: () => daySheetView(id), setlists: setlistsView, setlist: () => setlistView(id), songs: songsView, money: moneyView, prefs: prefsView, admin: () => isMgr() ? adminView() : homeView() };
   const sc0 = $('.scroll'), y = sc0 ? sc0.scrollTop : 0, same = S._route === route;
   // opening Gigs from anywhere (except coming back from a gig you just looked at) always starts on Upcoming
-  if (sec === 'gigs' && !same && !String(S._route || '').startsWith('gig/')) { UI.gigFilter = 'upcoming'; UI.gigYear = 'all'; UI.gigSearch = ''; keepUI(); }
+  if (sec === 'gigs' && !same && !String(S._route || '').startsWith('gig/')) { UI.gigFilters = ['upcoming']; UI._msel = null; keepUI(); }
   app.innerHTML = shell(route, (views[sec] || homeView)());
   const sc1 = $('.scroll'); if (sc1) sc1.scrollTop = same ? y : 0;
   S._route = route;
@@ -648,32 +661,24 @@ function gigLi(g, when) {
 }
 
 /* ============================================================ gigs list */
+const GIG_FILTERS = [['upcoming', 'Upcoming'], ['leads', 'Leads'], ['booked', 'Booked'], ['played', 'Played'], ['practices', 'Practices'], ['passed', 'Passed / cancelled']];
 function gigsView() {
-  const t = todayIso(), f = UI.gigFilter, q = UI.gigSearch.toLowerCase();
-  let rows = S.gigs.slice();
-  const filt = {
+  const t = todayIso(), fs = UI.gigFilters || [];
+  const F = {
     upcoming: g => g.gig_date >= t && (g.kind === 'practice' || ['confirmed','quoted','inquiry'].includes(g.status)) || (isGig(g) && !g.gig_date && live(g)),
     leads: g => isGig(g) && ['inquiry','quoted'].includes(g.status),
     booked: g => isGig(g) && g.status === 'confirmed',
     played: g => isGig(g) && g.status === 'complete',
     practices: g => g.kind === 'practice',
     passed: g => isGig(g) && ['passed','cancelled'].includes(g.status),
-    all: () => true,
-  }[f] || (() => true);
-  rows = rows.filter(filt).filter(g => !q || [g.title, g.venue, g.notes, (clientOf(g) || {}).org, (clientOf(g) || {}).contact_name].join(' ').toLowerCase().includes(q));
-  if (UI.gigYear !== 'all') rows = rows.filter(g => String(yearOf(g.gig_date)) === UI.gigYear);
-  const asc = f === 'upcoming' || f === 'leads' || f === 'booked';
+  };
+  const rows = S.gigs.filter(g => !fs.length || fs.some(k => F[k] && F[k](g)));         // several picked: show anything that matches any of them
+  const asc = fs.length && fs.every(k => ['upcoming', 'leads', 'booked'].includes(k));
   rows.sort((a, b) => (a.gig_date || '9999').localeCompare(b.gig_date || '9999') * (asc ? 1 : -1));
-  const years = [...new Set(S.gigs.map(g => yearOf(g.gig_date)).filter(Boolean))].sort((a, b) => b - a);
-  const counts = k => S.gigs.filter({ leads: g => isGig(g) && ['inquiry','quoted'].includes(g.status), booked: g => isGig(g) && g.status === 'confirmed' }[k]).length;
+  const counts = k => S.gigs.filter(F[k]).length;
   return `${title('Gigs & Practices')}
-   ${addBtns(true, '0px')}
-   <div class="row" style="margin-bottom:14px">
-     <div class="chips">${[['upcoming','Upcoming'],['leads',`Leads (${counts('leads')})`],['booked',`Booked (${counts('booked')})`],['played','Played'],['practices','Practices'],['passed','Passed'],['all','All']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-act="gig-filter" data-v="${k}">${l}</button>`).join('')}</div>
-     <span class="spacer"></span>
-     <select class="in" id="gigYear" style="width:auto"><option value="all">All years</option>${years.map(y => `<option ${UI.gigYear == y ? 'selected' : ''}>${y}</option>`).join('')}</select>
-     <input class="in" id="gigSearch" placeholder="Search" value="${esc(UI.gigSearch)}" style="width:180px">
-   </div>
+   <div class="row gig-bar" style="margin-bottom:14px"><button class="btn sm gold" data-act="new-gig">+ Gig / lead</button><button class="btn sm gold" data-act="new-practice">+ Practice</button><span class="spacer"></span>
+     ${msel('gigs', GIG_FILTERS.map(([k, l]) => [k, ['leads', 'booked'].includes(k) ? `${l} (${counts(k)})` : l]), fs, 'All', true)}</div>
    <section class="panel"><div class="list">${rows.map(gigLi).join('') || '<div class="empty">Nothing here.</div>'}</div></section>`;
 }
 
@@ -929,7 +934,6 @@ function gigRead(g) {
   const tbd = '<span class="faint">TBD</span>';
   const kv = (l, v) => `<div><div class="eyebrow">${l}</div><div class="v num">${v}</div></div>`;
   const mapUrl = (g.venue || g.address) ? 'https://maps.apple.com/?q=' + encodeURIComponent([g.venue, g.address].filter(Boolean).join(', ')) : '';
-  const stepper = practice || !mgr ? '' : `<div class="chips" style="margin-bottom:14px">${STATUS_PICK.map(([s, l, grp]) => `<button class="chip ${grp.includes(g.status) ? 'on' : ''}" data-act="set-status" data-v="${s}">${l}</button>`).join('')}</div>`;
   const facts = practice
     ? [kv('Date', esc(fmtDate(g.gig_date))), kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd), kv('Where', g.venue ? esc(g.venue) : tbd)]
     : [kv('Date', esc(fmtDate(g.gig_date))), kv('Load-in', g.load_in_time ? esc(g.load_in_time) : tbd), g.soundcheck_time ? kv('Sound check', esc(g.soundcheck_time)) : '', kv('Start', g.start_time ? esc(g.start_time) : tbd), kv('End', g.end_time ? esc(g.end_time) : tbd),
@@ -959,10 +963,9 @@ function gigRead(g) {
       <div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="mail" data-v="quote">Quote email</button><button class="btn sm" data-act="mail" data-v="deposit">Deposit reminder</button><button class="btn sm" data-act="mail" data-v="details">Gig-week details</button><button class="btn sm" data-act="mail" data-v="invoice">Invoice email</button><button class="btn sm" data-act="mail" data-v="thanks">Thank-you</button></div>
     </div></section>`;
   return `
-  <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a></div>
+  <div class="row" style="margin-bottom:6px"><a href="#gigs" class="back">← Gigs</a><span class="spacer"></span><button class="btn gold ib-edit" data-act="gig-edit" aria-label="Edit" title="Edit">${PENCIL}</button></div>
   ${gigHead(g)}
-  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${practice ? '' : `<a class="btn" href="#daysheet/${g.id}">Day sheet</a>`}${L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button>' : ''}<button class="btn gold" data-act="gig-edit">Edit</button></div>
-  ${stepper}
+  <div class="row" style="margin-bottom:14px">${statusPill(g)}<span class="spacer"></span>${practice ? '' : `<a class="btn" href="#daysheet/${g.id}">Day sheet</a>`}${L && itemsOf(L.id).some(i => i.played) ? '<button class="btn gold btn-go" data-act="gig-mode" aria-label="Gig mode"><b>&gt;&gt;</b> Gig mode</button>' : ''}</div>
   ${right ? `<div class="split"><div class="stack">${left}</div><div class="stack">${right}</div></div>` : `<div class="stack" style="max-width:820px">${left}</div>`}`;
 }
 function gigEdit(g) {
@@ -1148,7 +1151,7 @@ function setlistsView() {
    <div class="row" style="margin-bottom:14px"><button class="btn gold" data-act="sl-new">+ New setlist</button></div>
    <div class="grid g2" style="align-items:start">
      <div class="stack">
-       <section class="panel"><h2 class="sec">Drafts</h2><div class="list">${drafts.map(slLi).join('') || '<div class="empty">No drafts. Start one with <b>+ New setlist</b>.</div>'}</div></section>
+       ${drafts.length ? `<section class="panel"><h2 class="sec">Drafts</h2><div class="list">${drafts.map(slLi).join('')}</div></section>` : ''}
        <section class="panel"><h2 class="sec">Upcoming gigs</h2><div class="list">${up.map(upRow).join('') || '<div class="empty">No upcoming gigs.</div>'}</div></section>
      </div>
      <section class="panel"><h2 class="sec">Past setlists</h2><div class="list">${past.map(slLi).join('') || '<div class="empty">Nothing yet.</div>'}</div></section>
@@ -1300,7 +1303,7 @@ function setlistEdit(id) {
   const pf = (k, l, v, extra = '') => `<label class="f">${l}<input class="in" type="number" min="0" step="any" data-plan="${k}" value="${esc(v ?? '')}" ${extra}></label>`;
   return `<div class="row" style="margin-bottom:6px"><a href="${gig ? '#gig/' + gig.id : '#setlists'}" class="back">← ${gig ? esc(gig.title) : 'Setlists'}</a></div>
   ${title(slName(L), `Setlist · ${items.length} songs · ${hm(total)} of music`)}
-  <div class="row" style="margin-bottom:14px"><span class="pill st-confirmed">Editing</span><span class="spacer"></span><button class="btn gold" data-act="sl-view">Done</button></div>
+  <div class="row" style="margin-bottom:14px"><span class="pill st-confirmed">Editing</span><span class="spacer"></span><span id="slDelWrap"><button class="btn danger" data-act="sl-del-ask">Delete</button></span><button class="btn gold" data-act="sl-view">Done</button></div>
   <section class="panel" style="margin-bottom:14px">
     <div class="row" style="align-items:flex-end;gap:12px">
       <label class="f grow" style="min-width:200px">Setlist name<input class="in" id="slName" value="${esc(L.name || '')}" placeholder="${esc(gig ? gig.title : 'e.g. Wedding — 2 × 60')}"></label>
@@ -1311,7 +1314,6 @@ function setlistEdit(id) {
         : `<span class="muted">Not assigned to a gig.</span><select class="in" id="slAssign" style="width:auto;max-width:300px"><option value="">Assign to gig…</option>${openGigs.map(x => `<option value="${x.id}">${esc(x.title)} (${x.gig_date ? mdY(x.gig_date) : 'date TBD'})</option>`).join('')}</select>`}
       <span class="spacer"></span>
       <button class="btn sm" data-act="sl-dup">Duplicate</button>
-      <span id="slDelWrap"><button class="btn sm danger" data-act="sl-del-ask">Delete setlist</button></span>
     </div>
   </section>
   <section class="panel" style="margin-bottom:14px">
@@ -1533,26 +1535,22 @@ const starsRO = v => [1, 2, 3, 4, 5].map(i => `<button tabindex="-1" class="${v 
 
 /* ============================================================ songs */
 function songsView() {
-  const stats = songStats(), q = UI.songSearch.toLowerCase(), f = UI.songFilter;
+  const stats = songStats(), f = UI.songFilter, fl = UI.songFlags || [];
   const sm = /^([bm])([\d.]+)$/.exec(UI.songStars || ''), starOk = s => !sm || (sm[1] === 'b' ? avgRating(s.id) : myRating(s.id)) >= parseFloat(sm[2]);
-  let rows = S.songs.filter(s => (f === 'all' || s.status === f) && (!q || [s.title, s.artist, s.lead_vox, s.starter, s.genre].join(' ').toLowerCase().includes(q)) && (!UI.songNoChart || !chartFor(s.id)) && (!UI.songFlag || s['is_' + UI.songFlag]) && starOk(s));
+  let rows = S.songs.filter(s => (f === 'all' || s.status === f) && fl.every(k => k === 'nochart' ? !chartFor(s.id) : s['is_' + k]) && starOk(s));   // every ticked filter must match
   const key = UI.songSort, dir = UI.songSortDir === 'desc' ? -1 : 1;
   const val = s => ({ title: s.title, artist: s.artist || '', key: s.song_key || '', length: n0(s.length_min), bpm: n0(s.bpm), lead: s.lead_vox || '', mine: myRating(s.id), avg: avgRating(s.id) || 0, genre: (s.genre || '') + (9 - n0(s.energy)), plays: (stats[s.id] || {}).plays || 0, last: (stats[s.id] || {}).last || '', year: s.year || 0 }[key]);
   rows.sort((a, b) => { const x = val(a), y = val(b); return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * dir; });
   const counts = Object.fromEntries(['active','bench','learning','retired','holiday'].map(k => [k, S.songs.filter(s => s.status === k).length]));
   const th = (k, l, cls = '') => `<th data-act="song-sort" data-v="${k}" class="${cls}">${l}${UI.songSort === k ? (dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
   const ms = activeMembers();
-  return `${title('Songs')}
-  <div class="row" style="margin-bottom:14px">
-    <div class="chips">${[['active','Active'],['learning','Learning'],['bench','Bench'],['holiday','Holiday'],['retired','Retired'],['all','All']].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-act="song-filter" data-v="${k}">${l}${k !== 'all' ? ' ' + counts[k] : ''}</button>`).join('')}</div>
-    <span class="spacer"></span><input class="in" id="songSearch" placeholder="Search title, artist, singer" value="${esc(UI.songSearch)}" style="width:220px"><label class="btn" style="cursor:pointer">Import charts<input type="file" accept="application/pdf" multiple hidden data-chart-import></label><button class="btn gold" data-act="song-new">+ Song</button>
+  return `${titleRow('Songs', `<label class="btn sm" style="cursor:pointer">Import charts<input type="file" accept="application/pdf" multiple hidden data-chart-import></label><button class="btn sm gold" data-act="song-new">+ Song</button>`)}
+  <div class="song-filters">
+    <select class="in" data-song-status aria-label="Status">${[['active','Active'],['learning','Learning'],['bench','Bench'],['holiday','Holiday'],['retired','Retired'],['all','All songs']].map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l}${k !== 'all' ? ' (' + counts[k] + ')' : ''}</option>`).join('')}</select>
+    <select class="in" data-song-stars aria-label="Rating"><option value="">Any rating</option>${[['b3', 'Band avg ★ 3+'], ['b3.5', 'Band avg ★ 3.5+'], ['b4', 'Band avg ★ 4+'], ['b4.5', 'Band avg ★ 4.5+'], ['m3', 'My stars ★ 3+'], ['m4', 'My stars ★ 4+'], ['m5', 'My stars ★ 5']].map(([v, l]) => `<option value="${v}" ${UI.songStars === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    ${msel('songs', [['nochart', 'No chart for me'], ['opener', 'Good openers'], ['closer', 'Good closers'], ['encore', 'Good encores']], fl, 'More filters', true)}
   </div>
-  <div class="row" style="margin:-4px 0 14px;gap:8px;flex-wrap:wrap">
-    <button class="chip ${UI.songNoChart ? 'on' : ''}" data-act="song-nochart">No chart for me</button>
-    ${[['opener', 'Good openers'], ['closer', 'Good closers'], ['encore', 'Good encores']].map(([k, l]) => `<button class="chip ${UI.songFlag === k ? 'on' : ''}" data-act="song-flag" data-v="${k}">${l}</button>`).join('')}
-    <select class="in" data-song-stars style="width:auto;padding:5px 10px;font-size:13px"><option value="">Any rating</option>${[['b3', 'Band avg ★ 3+'], ['b3.5', 'Band avg ★ 3.5+'], ['b4', 'Band avg ★ 4+'], ['b4.5', 'Band avg ★ 4.5+'], ['m3', 'My stars ★ 3+'], ['m4', 'My stars ★ 4+'], ['m5', 'My stars ★ 5']].map(([v, l]) => `<option value="${v}" ${UI.songStars === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-    <span class="small muted">${rows.length} song${rows.length === 1 ? '' : 's'}</span>
-  </div>
+  <div class="small muted" style="margin:-6px 0 10px">${rows.length} song${rows.length === 1 ? '' : 's'}</div>
   <section class="panel"><div class="tbl-wrap"><table class="tbl">
     <thead><tr>${th('title', 'Song')}${th('key', 'Key')}${th('length', 'Len', 'r')}${th('bpm', 'BPM', 'r hide-sm')}${th('lead', 'Lead vox', 'hide-sm')}${th('genre', 'Genre', 'hide-sm')}${th('mine', 'Your rating')}${th('avg', 'Band', 'hide-sm')}${th('plays', 'Plays', 'r')}${th('last', 'Last played', 'hide-sm')}</tr></thead>
     <tbody>${rows.map(s => { const r = ratingsFor(s.id); return `<tr class="click" data-act="song-edit" data-id="${s.id}">
@@ -1636,7 +1634,7 @@ function cumPanel(ttl, kind, t, yNow) {
   const pal = isLight() ? ['#946100', '#2c67a8', '#7b4fc9', '#1f1709', '#2a8a72', '#c2477f'] : ['#ffbf43', '#8fb8e8', '#c9a7ff', '#f3eee4', '#7fd1b9', '#ff9ecb'], td = doy(t);
   let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:10px" role="img" aria-label="${ttl}">`;
   for (let v = 0; v <= top; v += step) s += `<line x1="${pl}" x2="${W - pr}" y1="${yv(v)}" y2="${yv(v)}" style="stroke:rgba(var(--fg),.08)"/><text x="${pl - 6}" y="${yv(v) + 4}" text-anchor="end">${v}</text>`;
-  for (let m = 0; m < 12; m++) { const a = doy(`${yNow}-${String(m + 1).padStart(2, '0')}-01`), b = m < 11 ? doy(`${yNow}-${String(m + 2).padStart(2, '0')}-01`) : 366; s += `<line x1="${x(a)}" x2="${x(a)}" y1="${H - pb}" y2="${H - pb + 4}" style="stroke:rgba(var(--fg),.25)"/><text x="${(x(a) + x(b)) / 2}" y="${H - 8}" text-anchor="middle">${MON[m]}</text>`; }
+  for (let m = 0; m < 12; m++) { const a = doy(`${yNow}-${String(m + 1).padStart(2, '0')}-01`), b = m < 11 ? doy(`${yNow}-${String(m + 2).padStart(2, '0')}-01`) : 366; s += `<line x1="${x(a)}" x2="${x(a)}" y1="${H - pb}" y2="${H - pb + 4}" style="stroke:rgba(var(--fg),.25)"/><text x="${(x(a) + x(b)) / 2}" y="${H - 8}" text-anchor="middle" ${m % 2 ? 'class="mo-odd"' : ''}>${MON[m]}</text>`; }
   s += `<line x1="${x(td)}" x2="${x(td)}" y1="${pt}" y2="${H - pb}" style="stroke:rgba(var(--fg),.3)" stroke-dasharray="2 4"/>`;
   series.slice().reverse().forEach(sr => {
     const c = pal[series.indexOf(sr) % pal.length], cur = sr.y === yNow, a = stair(sr.done, 1, 0);
@@ -1645,7 +1643,7 @@ function cumPanel(ttl, kind, t, yNow) {
   });
   s += '</svg>';
   const legend = series.map((sr, i) => `<span><i style="background:${pal[i % pal.length]}"></i>${sr.y} · ${sr.done.length}${sr.todo.length ? ` <span class="faint">→ ${sr.done.length + sr.todo.length} on calendar</span>` : ''}</span>`).join('');
-  return `<section class="panel"><h2 class="sec" style="margin-bottom:6px">${ttl}</h2><div class="legend">${legend}</div>${s}<p class="small faint" style="margin:6px 0 0">Dashed line = everything still on the calendar${kind === 'gig' ? ', including leads' : ''}.</p></section>`;
+  return `<section class="panel"><h2 class="sec" style="margin-bottom:6px">${ttl}</h2><div class="legend">${legend}</div>${s}</section>`;
 }
 function moneyView() {
   const yrSel = UI.moneyYear, t = todayIso();
@@ -1714,7 +1712,7 @@ function yearChart(data) {
   s += line(d => yI(inc(d)), 'var(--gold)') + line(d => yN(d.n), BLUE, true);
   data.forEach((d, i) => {
     const yi = yI(inc(d)), yn = yN(d.n), nAbove = yn < yi, bottom = H - pb - 8;      // labels point away from each other; at an edge they slide to the side
-    const lab = (cx, cy, dy, txt, c) => { const yy = cy + dy; return (yy > bottom || yy < pt + 4) ? `<text x="${cx + 11}" y="${cy + 4}" text-anchor="start" style="fill:${c};font-weight:700">${txt}</text>` : `<text x="${cx}" y="${yy}" text-anchor="middle" style="fill:${c};font-weight:700">${txt}</text>`; };
+    const lab = (cx, cy, dy, txt, c) => { const yy = cy + dy * 1.8; return (yy > bottom || yy < pt + 4) ? `<text x="${cx + 11}" y="${cy}" dy=".35em" text-anchor="start" style="fill:${c};font-weight:700">${txt}</text>` : `<text x="${cx}" y="${cy}" dy="${dy > 0 ? '1.45em' : '-.7em'}" text-anchor="middle" style="fill:${c};font-weight:700">${txt}</text>`; };
     s += `<circle cx="${x(i)}" cy="${yi}" r="5" fill="var(--gold)"><title>${d.y}: ${money(inc(d))} from ${d.n} gigs</title></circle>${lab(x(i), yi, nAbove ? 21 : -10, money(inc(d), true), 'var(--gold)')}`;
     s += `<rect x="${x(i) - 5}" y="${yn - 5}" width="10" height="10" fill="${BLUE}"><title>${d.y}: ${d.n} gigs</title></rect>${lab(x(i), yn, nAbove ? -10 : 21, d.n, BLUE)}`;
   });
@@ -1772,10 +1770,6 @@ function prefsView() {
   <section class="panel" style="margin-bottom:18px;max-width:620px"><h2 class="sec">My preferences</h2>
     <label class="f" style="margin-bottom:14px;max-width:320px">Appearance<select class="in" data-theme-pick>${[['dark', 'Dark'], ['light', 'Light'], ['auto', 'Match my device']].map(([v, l]) => `<option value="${v}" ${(UI.theme || 'dark') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="check" style="align-items:flex-start"><input type="checkbox" data-act="toggle-cb" ${UI.cb ? 'checked' : ''}><span><b>Colorblind-friendly mode</b></span></label>
-    ${(() => { if (!S.me) return ''; const st = settings(), off = Array.isArray(st.digest_optout) && st.digest_optout.includes(S.me.id);
-      return `<div class="f" style="margin-top:14px;max-width:520px"><span>Weekly digest email</span>
-      <label class="check" style="align-items:flex-start"><input type="checkbox" data-digest-on ${off ? '' : 'checked'}><span>Email me the Monday digest</span></label>
-      <div class="row" style="margin-top:6px"><button class="btn sm" data-act="digest-preview">Preview</button><button class="btn sm" data-act="digest-test">Send me a test now</button></div></div>`; })()}
     ${(() => { const cur = fitOf(); return `<label class="f" style="margin-top:14px;max-width:320px">Screen fit<select class="in" data-text-size>${cur === 'custom' ? '<option value="custom" selected>Custom (your earlier settings)</option>' : ''}${Object.entries(FITS).map(([k, f]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${f.label}</option>`).join('')}</select></label>`; })()}
     ${(() => { if (!S.me) return ''; const cur = S.chart_defaults.find(d => d.member_id === S.me.id), ids = new Set(S.song_charts.filter(c => c.member_id !== S.me.id).map(c => c.member_id)); if (cur) ids.add(cur.use_member_id); const mine = S.song_charts.filter(c => c.member_id === S.me.id).length;
       return `<label class="f" style="margin-top:14px">When I don’t have my own chart for a song, use…<select class="in" data-chart-default><option value="">Nobody’s (leave it blank)</option>${[...ids].map(id => `<option value="${id}" ${cur && cur.use_member_id === id ? 'selected' : ''}>${esc((byId('members', id) || {}).name || 'Bandmate')}’s chart</option>`).join('')}</select></label>`; })()}
@@ -1790,12 +1784,17 @@ function prefsView() {
       <label class="check" style="margin-top:10px;align-items:flex-start"><input type="checkbox" data-media-mode ${UI.media ? 'checked' : ''}><span>My pedal is in <b>music-control mode</b> (next / previous track)<div class="small muted">Gig mode plays a silent sound so the iPad passes those buttons to the app. Turn on only if your pedal sends music controls.</div></span></label>
       <div class="row" style="margin-top:6px"><button class="btn sm" data-act="ped-media-test">Test music-control buttons</button></div></div>
   </section>
-  ${S.me ? `<section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Phone notifications</h2>
+  ${S.me ? `<section class="panel" style="margin-top:18px;max-width:620px"><h2 class="sec">Notifications</h2>
     <p class="small muted" style="margin-top:0">Subscribe to helpful band notifications.</p>
+    <div class="eyebrow" style="margin-top:4px">Push to this device</div>
     <div class="row" style="margin-top:6px"><button class="btn" id="pushBtn" data-act="push-toggle" aria-pressed="false">Checking…</button><button class="btn sm" id="pushTestBtn" data-act="push-test" disabled>Send me a test</button></div>
     <div class="small muted" id="pushState" style="margin-top:8px"></div>
-    ${mgr ? `<div class="row" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)"><button class="btn sm gold" data-act="push-compose">📣 Send a notification to the band</button></div>` : ''}
-  </section>` : ''}`, 'prefs', ['Page-turner pedal', 'Phone notifications']);
+    ${(() => { const off = Array.isArray(st.digest_optout) && st.digest_optout.includes(S.me.id);
+      return `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)"><div class="eyebrow">Weekly digest email</div>
+      <label class="check" style="align-items:flex-start;margin-top:4px"><input type="checkbox" data-digest-on ${off ? '' : 'checked'}><span>Email me the Monday digest</span></label>
+      <div class="row" style="margin-top:6px"><button class="btn sm" data-act="digest-preview">Preview</button><button class="btn sm" data-act="digest-test">Send me a test now</button></div></div>`; })()}
+    ${mgr ? `<div class="row" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)"><button class="btn sm gold" data-act="push-compose">Send a notification to the band</button></div>` : ''}
+  </section>` : ''}`, 'prefs', ['Page-turner pedal', 'Notifications']);
 }
 function trashPanel() {
   const rows = TRASHABLE.flatMap(t => S._trash[t].map(r => ({ t, r }))).sort((a, b) => (b.r.deleted_at || '').localeCompare(a.r.deleted_at || ''));
@@ -1845,9 +1844,8 @@ function inqProblems(cfg) {
 function adminView() {
   const st = settings(), ms = S.members.slice().sort((a, b) => a.sort - b.sort), mgr = isMgr();
   const f = (k, l, cls = '', type = 'text') => `<label class="f ${cls}">${l}<input class="in" data-st="${k}" type="${type}" value="${esc(st[k] ?? '')}"></label>`;
-  return foldPanels(`${title('Admin')}
+  return foldPanels(`${titleRow('Admin', `<button class="btn ib-edit ${UI.editMode ? 'gold' : ''}" data-act="edit-mode-toggle" aria-pressed="${UI.editMode ? 'true' : 'false'}" aria-label="Edit mode" title="Edit mode: ${UI.editMode ? 'on' : 'off'}">${PENCIL}</button>`)}
   <div class="small faint" style="margin:-6px 0 14px">App version ${APP_V} · ${displayInfo()} · <a href="#" data-act="app-refresh">Update app files now</a></div>
-  <label class="check" style="margin:0 0 16px;align-items:flex-start"><input type="checkbox" data-edit-mode ${UI.editMode ? 'checked' : ''}><span><b>Edit mode</b></span></label>
   <div class="grid g2">
     <section class="panel"><div class="row"><h2 class="sec" style="margin:0">Clients</h2><span class="spacer"></span><button class="btn sm gold" data-act="client-new">+ New client</button></div>
       <div class="list" style="margin-top:8px">${S.clients.slice().sort((a, b) => (a.org || a.contact_name || '').localeCompare(b.org || b.contact_name || '')).map(c => { const n = S.gigs.filter(g => g.client_id === c.id).length; return `<div class="li" data-act="client-edit" data-id="${c.id}" style="cursor:pointer"><div class="grow"><div class="t">${esc(c.org || c.contact_name)}</div><div class="s">${esc([c.contact_name, c.email, c.phone].filter(Boolean).join(' · '))}</div></div><span class="small muted">${esc(c.code || '')} · ${n} gig${n === 1 ? '' : 's'}</span></div>`; }).join('') || '<div class="empty">No clients yet — add one here, or from a gig.</div>'}</div>
@@ -2253,7 +2251,7 @@ window.addEventListener('online', () => marksSync());
 function gmToolsHtml() {
   const txt = GMK.tool === 'text', mode = txt ? 'text' : GMK.input;
   const m = (v, l, hint) => `<button class="gm-tb gm-mode ${mode === v ? 'on' : ''}" data-gm="mode" data-v="${v}" title="${hint}">${l}</button>`;
-  return `<span class="gm-mgrp">${m('pencil', '✏️ Pen', 'Draw with the Apple Pencil (fingers still scroll)')}${m('text', 'T Text', 'Tap the page to type a note')}${m('finger', '☝️ Finger', 'Draw with your finger')}</span><span class="gm-sep"></span>`
+  return `<span class="gm-mgrp">${m('pencil', 'Pen', 'Draw with the Apple Pencil (fingers still scroll)')}${m('text', 'Text', 'Tap the page to type a note')}${m('finger', 'Finger', 'Draw with your finger')}</span><span class="gm-sep"></span>`
     + PEN_COLORS.map(([c, n]) => `<button class="gm-sw ${(GMK.tool === 'pen' || txt) && GMK.color === c ? 'on' : ''}" data-gm="tool" data-v="${txt ? 'text' : 'pen'}" data-c="${c}" aria-label="${n}" style="--c:${c}"></button>`).join('')
     + (txt ? [[0.022, 'S'], [0.03, 'M'], [0.042, 'L']].map(([v, l]) => `<button class="gm-tb ${GMK.tsz === v ? 'on' : ''}" data-gm="tsz" data-v="${v}" aria-label="Text size ${l}">${l}</button>`).join('')
       : `<button class="gm-tb ${GMK.tool === 'hl' ? 'on' : ''}" data-gm="tool" data-v="hl">Highlight</button><button class="gm-tb ${GMK.tool === 'erase' ? 'on' : ''}" data-gm="tool" data-v="erase">Erase</button>`)
@@ -2864,7 +2862,12 @@ function openModal(html) { closeModal(); const d = document.createElement('div')
 function closeModal() { const m = $('#modalRoot'); if (m) m.remove(); }
 
 /* ============================================================ events */
+function chartText() {                                              // chart labels stay ~13px on screen however wide the chart is drawn
+  $$('svg.chart').forEach(c => { const w = c.getBoundingClientRect().width, vb = (c.viewBox && c.viewBox.baseVal && c.viewBox.baseVal.width) || 640; if (w) { c.style.setProperty('--cfs', (13 * vb / w).toFixed(1) + 'px'); c.classList.toggle('narrow', w < 520); } });
+}
+window.addEventListener('resize', () => { clearTimeout(chartText.t); chartText.t = setTimeout(chartText, 150); });
 function after(sec, id) {
+  if (sec === 'money') chartText();
   if (sec === 'prefs') pushState();
   if (sec === 'home' || !sec) pushNag();
   const gs = $('#gigSearch'); if (gs) gs.oninput = e => { UI.gigSearch = e.target.value; keepUI(); rerenderKeepFocus('#gigSearch'); };
@@ -2907,6 +2910,12 @@ document.addEventListener('change', async e => {
   } else if (t.matches('[data-imp]')) {
     S._imp.rows[Number(t.dataset.imp)].songId = t.value; const n = S._imp.rows.filter(r => r.songId).length, b = $('[data-act="chart-import-go"]');
     if (b) { b.textContent = `Upload ${n} chart${n === 1 ? '' : 's'}`; b.disabled = !n; }
+  } else if (t.matches('[data-msel-k]')) {                       // a checkbox in a pick-several dropdown
+    const k = t.dataset.mselK, vals = [...document.querySelectorAll(`[data-msel-k="${k}"]:checked`)].map(x => x.value);
+    if (k === 'gigs') UI.gigFilters = vals; else if (k === 'songs') UI.songFlags = vals;
+    UI._msel = k; keepUI(); render();
+  } else if (t.matches('[data-song-status]')) {
+    UI.songFilter = t.value; keepUI(); render();
   } else if (t.matches('[data-media-mode]')) {
     UI.media = t.checked; keepUI(); toast(t.checked ? 'Gig mode will listen for music-control buttons' : 'Music-control mode off');
   } else if (t.matches('[data-ftr]')) {
@@ -2940,7 +2949,9 @@ document.addEventListener('submit', async e => {
 
 document.addEventListener('click', async e => {
   const hrefRow = e.target.closest('tr[data-href]'); if (hrefRow && !e.target.closest('a,button')) { location.hash = hrefRow.dataset.href; return; }
-  { const wm = $('#whoMenu'); if (wm && !wm.hidden && !e.target.closest('#whoMenu,[data-act="who-menu"]')) wm.hidden = true; }      // click anywhere else closes the account menu
+  { const wm = $('#whoMenu'); if (wm && !wm.hidden && !e.target.closest('#whoMenu,[data-act="who-menu"]')) wm.hidden = true; }
+  if (!e.target.closest('details.msel')) { $$('details.msel[open]').forEach(d => d.open = false); UI._msel = null; }       // tap outside closes a filter menu
+  else { const d = e.target.closest('details.msel'); $$('details.msel[open]').forEach(x => { if (x !== d) x.open = false; }); }      // click anywhere else closes the account menu
   const el = e.target.closest('[data-act]'); if (!el) return;
   const fc = e.target.closest('input,textarea,select'); if (fc && fc !== el) return;                       // typing in a field never fires the card around it
   if (el.closest('[data-stop]') && el.dataset.act === 'modal-close' && el.classList.contains('scrim')) return;
@@ -3111,6 +3122,7 @@ const ACTIONS = {
   'sl-edit': ({ g }) => { if (!g) return; S.editSl = g.id; render(); },
   'sl-view': ({ g }) => { if (!g) return; S.editSl = null; render(); },
   'cal-span': ({ v }) => { UI.calSpan = v; keepUI(); render(); },
+  'edit-mode-toggle': () => { UI.editMode = !UI.editMode; keepUI(); toast(UI.editMode ? 'Edit mode on — things open straight into Edit' : 'Edit mode off'); render(); },
   'toggle-cb': ({ el }) => { UI.cb = el.checked; keepUI(); render(); },
   // setlists
   'sel-set': ({ v, e }) => { if (e.target.closest('button')) return; UI.selSet = Number(v); render(); },

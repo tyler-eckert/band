@@ -269,7 +269,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .team{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
 .mate{display:flex;flex-direction:column}
 .mate img{width:100%;aspect-ratio:3/4;object-fit:cover;filter:grayscale(1);border-radius:4px 4px 0 0;display:block}
-.mate .plate{border-radius:0 0 4px 4px;text-align:center}
+.mate .plate{border-radius:0 0 4px 4px;text-align:center;flex:1;display:flex;flex-direction:column;justify-content:center}   /* every card ends at the same line, even when a name wraps */
 
 /* ---------- modal / toast ---------- */
 .scrim{position:fixed;inset:0;background:rgba(5,3,0,.72);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:max(24px,env(safe-area-inset-top)) 16px 24px;overflow:auto}
@@ -305,8 +305,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .att-i .btn.sm{flex:none}.att-more{flex:none;font-size:18px;line-height:1;padding:2px 6px}
 details.fold>summary .small.muted{white-space:nowrap}
 .empty{padding:28px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:var(--r)}
-.chart text{fill:var(--muted);font-size:11px;font-family:var(--body)}
-.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.chart text{fill:var(--cream);fill-opacity:.82;font-size:var(--cfs,13px);font-family:var(--body)}
+.legend{display:flex;gap:14px;font-size:13px;color:var(--cream);opacity:.85;flex-wrap:wrap}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .mail pre{white-space:pre-wrap;background:var(--ink-0);border:1px solid var(--line-soft);border-radius:8px;padding:12px;font:13px/1.5 var(--body);margin:8px 0}
 
@@ -434,7 +434,24 @@ main{padding-bottom:72px}
 .gm-btn.on{background:var(--gold-fill);color:#140e02;border-color:var(--gold)}
 .gm-tools{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;background:var(--raise2);border-bottom:1px solid var(--line-soft)}
 .gm-tools[hidden]{display:none}
-.gm-tools .gm-mode{min-width:76px}.gm-sep{width:1px;align-self:stretch;background:var(--line-soft);margin:0 2px}
+.gm-tools .gm-mode{min-width:76px}
+/* title with buttons on the right; pencil buttons; pick-several dropdowns; song filters */
+.title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 .9em}
+.title-row h1.echo{margin:0;min-width:0}
+.title-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
+.btn.ib-edit{width:44px;height:40px;min-height:40px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.gig-bar{flex-wrap:nowrap}.gig-bar .msel{flex:0 1 auto}.gig-bar .msel>summary{padding:7px 10px;font-size:13px}
+.chart.narrow .mo-odd{display:none}
+.msel{position:relative;min-width:0}
+.msel>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;white-space:nowrap;-webkit-user-select:none;user-select:none}
+.msel>summary::-webkit-details-marker{display:none}
+.msel-t{overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.msel .chev{opacity:.7;font-size:12px}
+.msel-pop{position:absolute;left:0;top:calc(100% + 4px);z-index:25;background:var(--ink-1);border:1px solid var(--line);border-radius:10px;padding:6px 12px;min-width:210px;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+.msel.r .msel-pop{left:auto;right:0}
+.msel-pop .check{padding:8px 0;white-space:nowrap}
+.song-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:14px;max-width:720px}
+.song-filters select.in,.song-filters .msel>summary{padding:8px 10px;font-size:13px}.gm-sep{width:1px;align-self:stretch;background:var(--line-soft);margin:0 2px}
 .gm-hint{flex-basis:100%;font-size:12px;color:var(--muted)}
 .gm-txt{position:absolute;z-index:3;margin:0;padding:.1em .25em;border:2px dashed #1d4ed8;border-radius:4px;background:rgba(255,255,255,.92);font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-weight:600;line-height:1.2;resize:none;overflow:hidden;white-space:pre;outline:none;-webkit-user-select:text;user-select:text;min-height:1.4em}
 #gigMode .gm-txt{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
@@ -561,6 +578,6 @@ if(h)document.documentElement.style.setProperty('--top-h',h.offsetHeight+'px');}
 new MutationObserver(m).observe(app,{childList:true});addEventListener('resize',m);addEventListener('orientationchange',m);m();})();</script>
 <script src="vendor/supabase.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="app.js?v=90"></script>
+<script src="app.js?v=91"></script>
 </body>
 </html>
