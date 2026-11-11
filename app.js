@@ -60,7 +60,7 @@ const TRAINING = [
 ];
 const TRASHABLE = ['gigs', 'songs', 'setlists', 'clients', 'expenses'];
 S._trash = { gigs: [], songs: [], setlists: [], clients: [], expenses: [] }; S._trashReady = true; S.activity = []; S._actReady = true;
-const APP_V = 93;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
+const APP_V = 94;                                                  // matches app.js?v=… in index.html; shown under Band → My preferences
 const OFFLINE_MSG = 'You’re offline — this is view-only until you’re back online.';
 ['upsert', 'remove', 'uploadPhoto', 'uploadChart', 'removePhoto', 'removeChart'].forEach(k => { const f = api[k]; if (f) api[k] = (...a) => S.offline ? Promise.reject(new Error(OFFLINE_MSG)) : f.apply(api, a); });
 const timeoutP = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -1706,7 +1706,7 @@ function yearChart(data) {
   const inc = d => d.pay + d.tips + d.merch, BLUE = isLight() ? '#2c67a8' : '#8fb8e8';
   const nice = m => { const e = Math.pow(10, Math.floor(Math.log10(m || 1))), f = m / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 4 ? 4 : f <= 5 ? 5 : 10) * e; };
   const topI = nice(Math.max(...data.map(inc), 1)), topN = Math.max(4, Math.ceil(Math.max(...data.map(d => d.n), 1) / 4) * 4);
-  const W = 640, H = 310, n = data.length, tickI = k => money(Math.round(topI * k / 4)), tickN = k => String(Math.round(topN * k / 4));
+  const W = 640, H = 310, n = data.length, kf = v => v >= 1000 ? '$' + +(v / 1000).toFixed(1) + 'k' : '$' + Math.round(v), tickI = k => kf(topI * k / 4), tickN = k => String(Math.round(topN * k / 4));
   const pl = 16 + 14 * Math.max(6, ...[0, 1, 2, 3, 4].map(k => tickI(k).length)), pr = 16 + 14 * Math.max(4, String(topN).length), pt = 54, pb = 62;   // pt: the Income / Gigs headings sit above the top line   // side margins sized to the labels so nothing is clipped
   const x = i => pl + (W - pl - pr) * (i + .5) / n, yI = v => pt + (H - pt - pb) * (1 - v / topI), yN = v => pt + (H - pt - pb) * (1 - v / topN);
   let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:10px" role="img" aria-label="Income and gig count by year">`;
@@ -1719,7 +1719,7 @@ function yearChart(data) {
   data.forEach((d, i) => {
     const yi = yI(inc(d)), yn = yN(d.n), nAbove = yn < yi, bottom = H - pb - 8;      // labels point away from each other; at an edge they slide to the side
     const lab = (cx, cy, dy, txt, c) => { const yy = cy + dy * 1.8; return (yy > bottom || yy < pt + 4) ? `<text x="${cx + 11}" y="${cy}" dy=".35em" text-anchor="start" style="fill:${c};font-weight:700">${txt}</text>` : `<text x="${cx}" y="${cy}" dy="${dy > 0 ? '1.45em' : '-.7em'}" text-anchor="middle" style="fill:${c};font-weight:700">${txt}</text>`; };
-    s += `<circle cx="${x(i)}" cy="${yi}" r="5" fill="var(--gold)"><title>${d.y}: ${money(inc(d))} from ${d.n} gigs</title></circle>${lab(x(i), yi, nAbove ? 21 : -10, money(Math.round(inc(d))), 'var(--gold)')}`;
+    s += `<circle cx="${x(i)}" cy="${yi}" r="5" fill="var(--gold)"><title>${d.y}: ${money(inc(d))} from ${d.n} gigs</title></circle>${lab(x(i), yi, nAbove ? 21 : -10, kf(inc(d)), 'var(--gold)')}`;
     s += `<rect x="${x(i) - 5}" y="${yn - 5}" width="10" height="10" fill="${BLUE}"><title>${d.y}: ${d.n} gigs</title></rect>${lab(x(i), yn, nAbove ? -10 : 21, d.n, BLUE)}`;
   });
   return s + '</svg>';
